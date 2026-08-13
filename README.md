@@ -104,13 +104,20 @@ phi lâm sàng, không phải hệ thống cấp cứu.
 
 Linh kiện cốt lõi người dùng đã có đủ. Breadboard, dây Dupont, cáp USB data và nguồn ổn định chỉ là vật tư hỗ trợ lắp thử. DHT11 dùng DATA tại D5/GPIO14; cảm biến rời bốn chân cần pull-up 4,7–10 kΩ lên 3V3, còn nhiều module ba chân đã có sẵn điện trở này. Buzzer/nút nhấn là tùy chọn; thao tác ACK chính nằm trên dashboard.
 
-Firmware `0.2.1` phát `health.telemetry.v2` với `ambient_temp_c` và
+Firmware `0.2.2` phát `health.telemetry.v2` với `ambient_temp_c` và
 `humidity_pct`. Edge vẫn xác thực telemetry v1 và giữ nguyên dữ liệu
 `skin_temp_*` lịch sử trong SQLite; dữ liệu cũ không bị đổi nghĩa thành số đo
 DHT11. Firmware nhận MPU-6050 có `WHO_AM_I=0x68` hoặc module
 MPU-6500-compatible có `WHO_AM_I=0x70`, cùng ở địa chỉ I2C `0x68`. Mã lỗi công
 khai cũ `mpu6050_unavailable` được giữ lại cho cả hai biến thể để không phá vỡ
 edge/dashboard. Xem chi tiết trong [hợp đồng dữ liệu](docs/data-contract.md).
+
+Firmware `0.2.2` cũng sửa đường khôi phục FIFO MAX30102: không dùng giá trị
+`OVF_COUNTER` đọc trước mẫu làm gate, vì counter bão hòa sau overflow lúc khởi
+động có thể giữ node trong vòng clear-and-return. Cửa sổ PPG vẫn fail-closed khi
+khoảng lấy mẫu vượt `250 ms` hoặc `check()` của thư viện SparkFun trả về từ bốn
+mẫu trong buffer cục bộ. Đường quang thô đã được chứng minh; HR/SpO₂ cuối vẫn
+cần thử lại với ngón tay đặt đúng và ổn định.
 
 ## Lưu ý về 5G
 

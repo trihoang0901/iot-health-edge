@@ -56,7 +56,7 @@ Không tạo tệp password rỗng thủ công. Nếu chủ động tạo lại 
 - Xác nhận Mosquitto đang map cổng 1883, Windows Firewall cho phép subnet
   Private, client hotspot không bị cô lập và tài khoản `health_node` đúng ACL.
 - Kết nối chỉ được xem là phục hồi khi broker thấy client node, API nhận bản
-  tin `health.telemetry.v2` mới với firmware `0.2.1` và báo `online=true`.
+  tin `health.telemetry.v2` mới với firmware `0.2.2` và báo `online=true`.
   Serial `mqtt_connected` là checkpoint phần cứng bổ sung cần ghi lại.
 
 ### Payload bị từ chối
@@ -116,16 +116,33 @@ best-effort đã chấp nhận, không dùng kênh này cho tình huống cấp 
 - Chạy I²C scanner riêng trước khi ghép thuật toán.
 - Kiểm tra pull-up I²C đã có trên module; quá nhiều pull-up song song cũng có thể làm bus lỗi.
 
+### MAX30102 thấy ở `0x57` nhưng liên tục `ppg_sample_loss`
+
+- Firmware trước `0.2.2` có thể đọc `OVF_COUNTER` trước mẫu và xem giá trị bão
+  hòa sau startup overflow là lỗi. Một số module cần tiêu thụ một mẫu hoàn chỉnh
+  trước khi counter trở lại bình thường, nên clear-and-return trước khi đọc có
+  thể tự khóa đường FIFO.
+- Dùng firmware `0.2.2`: pre-read `OVF_COUNTER` không còn là gate. Firmware vẫn
+  fail-closed khi khoảng gọi MAX30102 vượt `250 ms` hoặc SparkFun `check()` fetch
+  từ bốn mẫu vào buffer cục bộ; khi đó cửa sổ PPG cũ bị hủy có chủ đích.
+- Diagnostic đã thấy khoảng 25 mẫu/s, gap tối đa 10–37 ms và không có local
+  storage hit. IR không-ngón-tay khoảng 812–853; probe với ngón tay trước đó đạt
+  khoảng 219.000–225.000. Điều này xác nhận đường quang thô, chưa xác nhận HR
+  hoặc SpO₂ cuối.
+- Đặt ngón tay phủ đúng LED/photodiode, giữ lực ổn định và che ánh sáng ngoài.
+  Chỉ kết luận đạt khi telemetry mới có HR/SpO₂ cùng cờ hợp lệ phù hợp; không
+  diễn giải raw IR thành số đo sức khỏe.
+
 ### MPU-6050/MPU-6500-compatible không hoạt động
 
-- Firmware `0.2.1` thăm dò địa chỉ I2C `0x68`; giữ AD0 ở mức thấp. Nếu scanner
+- Firmware `0.2.2` thăm dò địa chỉ I2C `0x68`; giữ AD0 ở mức thấp. Nếu scanner
   chỉ thấy `0x69`, sửa mức AD0/dây nối thay vì đổi kết luận từ tên sản phẩm.
 - Sau khi ACK tại `0x68`, đọc thanh ghi `WHO_AM_I` ở `0x75`. Chỉ `0x68`
   (MPU-6050) hoặc `0x70` (MPU-6500-compatible) được hỗ trợ. Địa chỉ `0x68` và
   giá trị nhận dạng `0x68` là hai phép kiểm tra khác nhau.
 - Tiếp tục đọc đủ 14 byte từ `0x3B` đến `0x48`. NACK, ID khác hoặc frame thiếu
   nghĩa là chưa đạt, dù I2C scanner đã thấy địa chỉ.
-- Nạp firmware `0.2.1` rồi yêu cầu telemetry mới cùng boot có `seq` tăng,
+- Nạp firmware `0.2.2` rồi yêu cầu telemetry mới cùng boot có `seq` tăng,
   `quality.motion_valid=true`, `motion.accel_g`/`motion.gyro_dps` hữu hạn và
   không có `mpu6050_unavailable`. Gia tốc đứng yên nên hợp lý quanh 1 g sau khi
   đặt module ổn định; đây chỉ là kiểm tra bring-up, không phải hiệu chuẩn.

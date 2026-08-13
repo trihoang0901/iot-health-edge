@@ -29,7 +29,7 @@ three-pin DHT11 modules already include this resistor; verify the exact module
 before adding another one. The reported values describe the local environment,
 not a person.
 
-Firmware `0.2.1` probes the motion sensor at I2C address `0x68` and then reads
+Firmware `0.2.2` probes the motion sensor at I2C address `0x68` and then reads
 register `WHO_AM_I` (`0x75`). It accepts only `0x68` for MPU-6050 or `0x70` for
 an MPU-6500-compatible device. The I2C address and identity value are different
 checks: an address scan alone is not proof that the supported sensor is ready.
@@ -107,9 +107,13 @@ flood the broker with stale readings.
 ## Bounded sampling behavior
 
 - The supported MPU-6050/MPU-6500-compatible motion sensor is sampled at 50 Hz.
-- MAX30102 is drained every loop. Hardware overflow, a sampling gap, or four or
-  more samples returned into the SparkFun library's four-slot buffer invalidates
-  the current PPG window instead of silently publishing overwritten samples.
+- MAX30102 is drained every loop. Firmware `0.2.2` does not reject a read from
+  a pre-read `OVF_COUNTER`: after a startup overflow, a saturated counter can
+  require a complete sample to be consumed before it clears, so using it as a
+  gate can trap sampling in a clear-and-return loop.
+- Continuity still fails closed. A sampling gap over 250 ms or four or more
+  samples returned by SparkFun `check()` into its four-slot local buffer
+  invalidates the current PPG window instead of publishing discontinuous data.
 - The reference MAXIM HR/SpO2 calculation runs over a 100-sample rolling window
   no more than once per second.
 - DHT11 environmental values are sampled no more often than once every two
@@ -145,6 +149,13 @@ a bring-up value. The firmware suppresses HR/SpO2 during motion artifact,
 insufficient samples, unavailable motion-sensor quality data, implausible algorithm
 output, or finger removal. It does not repeat a stale value as current.
 
+The recovery diagnostic proved the raw optical path: bypassing the pre-read
+overflow gate yielded about 25 samples/s, maximum observed loop gaps of 10-37
+ms, and zero local-storage overflow hits. No-finger IR was about 812-853; an
+earlier finger probe reached about 219,000-225,000. These values prove sensor
+response, not valid final HR/SpO2. Final derived values remain pending a stable,
+correctly positioned finger test after firmware `0.2.2` is built and uploaded.
+
 DHT11 reports local ambient temperature and humidity. Its rated electrical
 range and successful digital output do not imply calibration or medical
 accuracy.
@@ -157,14 +168,17 @@ accuracy.
    hardware pass.
 2. Boot with each sensor disconnected in turn; MQTT/status must continue with a
    fault and nullable values, including `dht11_unavailable` for DHT11.
-3. Remove a finger from MAX30102; HR and SpO2 must become `null`.
-4. Move the board while collecting PPG; `motion_artifact` should suppress the
+3. Verify MAX30102 raw red/IR changes clearly between no-finger and a stable,
+   correctly positioned finger. Raw optical response alone is not an HR/SpO2
+   pass.
+4. Remove a finger from MAX30102; HR and SpO2 must become `null`.
+5. Move the board while collecting PPG; `motion_artifact` should suppress the
    derived values.
-5. Disconnect the hotspot for five minutes; local sampling and LED behavior
+6. Disconnect the hotspot for five minutes; local sampling and LED behavior
    must continue, then MQTT must recover without a telemetry burst.
-6. Verify repeated fall events share one `event_id` and the edge creates one
+7. Verify repeated fall events share one `event_id` and the edge creates one
    alert.
-7. Run for at least 60 minutes and watch free heap and resets.
+8. Run for at least 60 minutes and watch free heap and resets.
 
 Some phone hotspots isolate clients. Both the NodeMCU and laptop must be able to
 reach each other, Mosquitto must listen beyond localhost, and Windows Firewall

@@ -154,7 +154,7 @@ Ngưỡng demo có khoảng giữ mặc định nên `low_spo2`/`high_hr` cần 
    ```
 
 8. Xác nhận Serial có `wifi_connected` và `mqtt_connected`; API có bản tin mới
-   `health.telemetry.v2`, firmware `0.2.1` và thiết bị `online=true`. Broker
+   `health.telemetry.v2`, firmware `0.2.2` và thiết bị `online=true`. Broker
    phải thấy client của health node. DHT11 hợp lệ sẽ có
    `environment.ambient_temp_c`/`humidity_pct`; nếu chưa đọc được, hai giá trị
    phải là `null`, cờ hợp lệ là `false` và có `dht11_unavailable` nhưng node
@@ -166,6 +166,11 @@ Ngưỡng demo có khoảng giữ mặc định nên `low_spo2`/`high_hr` cần 
    `quality.motion_valid=true`, accel/gyro hữu hạn và không có fault cũ
    `mpu6050_unavailable`. Chưa có đủ bằng chứng này thì để checklist phần cứng
    ở trạng thái chưa hoàn thành.
+10. Với MAX30102, xác nhận raw red/IR thay đổi rõ khi đặt ngón tay đúng và ổn
+    định. Firmware `0.2.2` không chặn đọc theo pre-read `OVF_COUNTER`, nhưng vẫn
+    fail-closed nếu khoảng lấy mẫu vượt `250 ms` hoặc SparkFun `check()` fetch
+    từ bốn mẫu. Chỉ đánh dấu HR/SpO₂ đạt sau khi telemetry cuối có giá trị và cờ
+    hợp lệ đúng; raw quang học riêng lẻ chưa đủ.
 
 Launcher trên cố ý dành cho broker local. Nếu kiến trúc dùng broker đầu xa,
 không bỏ qua gate bằng cách giả địa chỉ local; dùng quy trình thủ công và các

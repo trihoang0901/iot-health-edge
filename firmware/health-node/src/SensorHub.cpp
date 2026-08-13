@@ -7,9 +7,6 @@
 
 namespace {
 
-constexpr uint8_t kMax30102Address = 0x57;
-constexpr uint8_t kFifoOverflowCounterRegister = 0x05;
-constexpr uint8_t kFifoOverflowCounterMask = 0x1F;
 // SparkFun MAX3010x keeps four slots and uses one slot to distinguish head/tail,
 // so four or more samples returned by check() means older samples were overwritten.
 constexpr uint16_t kSparkFunFifoStorageSize = 4;
@@ -145,13 +142,17 @@ void SensorHub::tickMax30102(uint32_t nowMs) {
     return;
   }
 
-  const bool samplingGap =
-      elapsed(nowMs, lastPpgTickMs_) > config::kPpgMaximumSamplingGapMs;
+  const uint32_t ppgTickGapMs = elapsed(nowMs, lastPpgTickMs_);
+  const bool samplingGap = ppgTickGapMs > config::kPpgMaximumSamplingGapMs;
   lastPpgTickMs_ = nowMs;
-  const uint8_t hardwareOverflow =
-      max30102_.readRegister8(kMax30102Address, kFifoOverflowCounterRegister) &
-      kFifoOverflowCounterMask;
-  if (samplingGap || hardwareOverflow != 0U) {
+
+  // Do not gate reads on OVF_COUNTER. A startup stall can saturate that
+  // counter, while a complete FIFO sample must be consumed before some
+  // MAX30102-compatible modules clear it. Treating the counter as a pre-read
+  // error therefore traps the sensor in an endless clear-and-return loop.
+  // The elapsed-time and local-buffer checks below still reject discontinuous
+  // PPG windows before they can produce HR/SpO2 values.
+  if (samplingGap) {
     max30102_.clearFIFO();
     resetPpgWindow();
     invalidatePpg(fingerPresent_);

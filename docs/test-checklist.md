@@ -63,9 +63,21 @@ Sau mỗi alert, ACK trên dashboard và xác nhận actor/note/thời điểm �
 - [ ] Đọc từng cảm biến riêng ổn định trước khi ghép.
 - [ ] Khi ghép, MQTT không rớt trong lúc đọc DHT11 hoặc thu FIFO MAX30102.
 - [ ] Che sáng/cố định ngón tay giúp điểm `ppg` ổn định hơn; nhiễu chuyển động làm cờ valid tắt.
+- [x] Diagnostic bỏ pre-read `OVF_COUNTER` nhận khoảng 25 mẫu/s, gap tối đa
+      10–37 ms và `storage_hits=0`; no-finger IR khoảng 812–853, probe ngón tay
+      trước đó khoảng 219.000–225.000. Đây chỉ là bằng chứng raw/optics.
+- [x] Clean build và upload firmware `0.2.2`; broker/API nhận boot mới, node
+      online và telemetry mới có `seq` tăng. Diagnostic xác nhận không còn vòng
+      clear-and-return do `OVF_COUNTER`.
+- [ ] Thử cưỡng bức gap `>250 ms` và SparkFun fetch `>=4`; xác nhận cửa sổ bị
+      xóa, phát `ppg_sample_loss` và không phát số cũ.
+- [x] Đặt ngón tay đúng, ổn định và che sáng: 20 mẫu production liên tiếp có
+      `finger_present=true`, PPG 0,66–0,81, HR/SpO₂ có giá trị và cờ valid;
+      mẫu chốt không còn fault. Đây là bring-up pipeline, không phải xác nhận
+      độ chính xác y tế.
 - [ ] Rút từng cảm biến tạo fault kỹ thuật đúng, không biến thành số đo giả.
 - [ ] Mất Wi-Fi/broker rồi khôi phục: node reconnect, boot/seq/status hợp lý.
-- [x] Sau upload firmware `0.2.1`, Serial có `wifi_connected` và
+- [x] Ở firmware trước bugfix PPG, Serial có `wifi_connected` và
       `mqtt_connected`; broker thấy client health node; API nhận telemetry v2
       mới, báo `online=true`, `seq` tăng trong cùng boot, motion hợp lệ với số
       hữu hạn và không còn `mpu6050_unavailable`.

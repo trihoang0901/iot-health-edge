@@ -36,7 +36,7 @@ thêm. Không suy đoán thứ tự chân chỉ từ hình hoặc màu dây.
 | D2 | GPIO4 | SDA MAX30102 + SDA MPU motion | Bus I²C dùng chung |
 | D5 | GPIO14 | DATA DHT11 | Pull-up DATA lên 3V3 nếu module chưa có sẵn |
 
-MAX30102 thường ở địa chỉ `0x57`. Firmware `0.2.1` dùng địa chỉ `0x68` cho cả
+MAX30102 thường ở địa chỉ `0x57`. Firmware `0.2.2` dùng địa chỉ `0x68` cho cả
 MPU-6050 và module MPU-6500-compatible, vì vậy AD0 phải ở mức thấp. Giá trị
 `WHO_AM_I` đọc từ thanh ghi `0x75` là `0x68` cho MPU-6050 hoặc `0x70` cho biến
 thể compatible; đây không phải địa chỉ I2C. DHT11 dùng giao thức một dây riêng
@@ -70,8 +70,14 @@ datasheet hoặc ký hiệu trên đúng linh kiện; module ba chân có thể 
 
 Sau khi cấp nguồn, chưa đánh dấu phần cứng MPU đạt chỉ vì scanner thấy `0x68`.
 Phải đọc `WHO_AM_I` và chỉ chấp nhận `0x68` hoặc `0x70`, đọc đủ 14 byte từ
-`0x3B`, rồi xác nhận firmware `0.2.1` phát số gia tốc/con quay hữu hạn mới.
+`0x3B`, rồi xác nhận firmware `0.2.2` phát số gia tốc/con quay hữu hạn mới.
 Phát hiện ngã vẫn chỉ là tính năng demo phi lâm sàng; không thử ngã trên người.
+
+Với MAX30102, ACK tại `0x57` chưa đủ. Sau khi firmware `0.2.2` được nạp, kiểm
+tra red/IR thô thay đổi rõ giữa không-ngón-tay và ngón tay đặt ổn định. Firmware
+không dùng pre-read `OVF_COUNTER` làm gate, nhưng vẫn hủy cửa sổ PPG nếu khoảng
+lấy mẫu vượt `250 ms` hoặc SparkFun `check()` fetch từ bốn mẫu. Số quang thô
+không phải bằng chứng HR/SpO₂ cuối hay độ chính xác y tế.
 
 Firmware đọc DHT11 không nhanh hơn một lần mỗi hai giây. Lỗi đọc phải tạo giá
 trị `null`, cờ hợp lệ `false` và fault `dht11_unavailable` nhưng không được làm
