@@ -108,10 +108,13 @@ phi lâm sàng, không phải hệ thống cấp cứu.
 Linh kiện cốt lõi người dùng đã có đủ. Breadboard, dây Dupont, cáp USB data và
 nguồn ổn định chỉ là vật tư hỗ trợ lắp thử. DS18B20 dùng chế độ cấp nguồn ba dây:
 VDD lên 3V3, GND chung, DATA tại D5/GPIO14 và điện trở **4,7 kΩ** từ DATA lên
-3V3. Không dùng parasite-power trong cấu hình này. Buzzer/nút nhấn là tùy chọn;
-thao tác ACK chính nằm trên dashboard.
+3V3. Firmware `0.3.1` bật thêm pull-up nội yếu của ESP8266 như một fallback cho
+dây prototype ngắn; fallback này không thay thế điện trở ngoài. Bản wearable ổn
+định vẫn bắt buộc có pull-up 4,7 kΩ đúng tại DATA lên 3V3. Không dùng
+parasite-power trong cấu hình này. Buzzer/nút nhấn là tùy chọn; thao tác ACK
+chính nằm trên dashboard.
 
-Source firmware `0.3.0` phát strict `health.telemetry.v3` với
+Source firmware `0.3.1` phát strict `health.telemetry.v3` với
 `wearable.wrist_surface_temp_c` và `quality.wrist_surface_temp_valid`. Phép
 chuyển đổi DS18B20 12-bit được yêu cầu bất đồng bộ rồi đọc sau ít nhất `750 ms`;
 vòng lặp không chờ bằng `delay()`. Edge tiếp tục xác thực v1/v2 và giữ nguyên
@@ -129,9 +132,19 @@ MAX30102: không dùng giá trị
 khoảng lấy mẫu vượt `250 ms` hoặc `check()` của thư viện SparkFun trả về từ bốn
 mẫu trong buffer cục bộ. Phiên `0.2.2` đã có raw quang học và 20 telemetry
 production liên tiếp với HR/SpO₂ hợp lệ khi đặt ngón tay ổn định; đây chỉ là
-bring-up phi lâm sàng, không chứng minh độ chính xác y tế. Source `0.3.0` giữ
-nguyên đường MAX/dual-MPU này nhưng **chưa được upload**; chưa có số đọc DS18B20
-vật lý nào được xác nhận cho `0.3.0`.
+bring-up phi lâm sàng, không chứng minh độ chính xác y tế. Source `0.3.1` giữ
+nguyên đường MAX/dual-MPU này và đã được upload trong phiên bring-up ngày
+2026-08-14. Sau khi rollback driver CH340 từ `3.9.2024.9` xuống `3.7.2022.1`,
+scanner A/B không thấy ROM ở nhánh `external_only`, nhưng nhánh có fallback
+pull-up nội tìm được family `0x28`, CRC hợp lệ, nguồn addressed ở chế độ powered
+và nhiệt độ `27.3125 °C`. Sau hard reset, Serial của production boot
+`a164b119f1fd90b3` báo firmware `0.3.1`, Wi-Fi tại `192.168.137.37` và MQTT đã
+kết nối. Telemetry mới tại `seq=23/25/28` có nhiệt độ cổ tay `27.3125 °C`, cờ
+hợp lệ, motion hợp lệ/`idle` và `sensor_faults=[]` ở cả ba mẫu. MAX30102 không
+còn fault unavailable hoặc `ppg_sample_loss`; do chưa đặt ngón tay,
+`finger_present=false` và HR/SpO₂ là `null` đúng fail-closed, nên vẫn chưa phải
+bằng chứng HR/SpO₂ mới. Dashboard hiển thị node online, nhiệt độ `27.3 °C` hợp
+lệ, firmware `0.3.1` và không có lỗi trình duyệt.
 
 ## Lưu ý về 5G
 
@@ -156,6 +169,7 @@ giới hạn đã chấp nhận của MVP phi lâm sàng, không phải cơ ch�
 - [Khắc phục sự cố](docs/troubleshooting.md)
 - [Checklist kiểm thử](docs/test-checklist.md)
 - [Thông báo Telegram](docs/telegram-notifications.md)
+- [Nhật ký bring-up DS18B20 2026-08-14](docs/journals/2026-08-14-ds18b20-hardware-bringup.md)
 
 ## Cấu trúc
 

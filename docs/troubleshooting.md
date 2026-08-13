@@ -55,12 +55,13 @@ Không tạo tệp password rỗng thủ công. Nếu chủ động tạo lại 
   thay đổi chương trình đang chạy trên NodeMCU.
 - Xác nhận Mosquitto đang map cổng 1883, Windows Firewall cho phép subnet
   Private, client hotspot không bị cô lập và tài khoản `health_node` đúng ACL.
-- Last-known physical firmware `0.2.2` phát v2. Source `0.3.0` chưa được upload,
-  vì vậy không xem việc node còn báo `0.2.2` là lỗi migration. Sau một lần upload
-  `0.3.0` được chủ động cho phép trong tương lai, kết nối chỉ được xem là phục
-  hồi khi broker thấy client, API nhận `health.telemetry.v3` mới với
-  `system.fw="0.3.0"`, `seq` tăng và báo `online=true`; Serial
-  `mqtt_connected` là checkpoint bổ sung.
+- Firmware vật lý hiện đã lên `0.3.1`. Sau hard reset, Serial boot
+  `a164b119f1fd90b3` báo `wifi_connected ip=192.168.137.37` và
+  `mqtt_connected`; edge nhận v3 tại `seq=23/25/28`, nhiệt độ `27.3125 °C`,
+  motion hợp lệ/`idle` và `sensor_faults=[]`. Sau mỗi lần upload,
+  chỉ xem kết nối là phục hồi khi broker thấy client, API nhận bản tin mới có
+  `system.fw="0.3.1"`, `seq` tăng và `online=true`; Serial `mqtt_connected` là
+  checkpoint bổ sung.
 
 ### Payload bị từ chối
 
@@ -114,6 +115,19 @@ best-effort đã chấp nhận, không dùng kênh này cho tình huống cấp 
 
 ## Phần cứng
 
+### CH340 xuất hiện nhưng upload/COM không ổn định
+
+- Máy bring-up 2026-08-14 đã rollback driver CH340 từ `3.9.2024.9` xuống bản
+  Microsoft-signed `3.7.2022.1` trước khi upload thành công. Đây là bằng chứng
+  của đúng máy thử, không chứng minh bản 3.9 luôn lỗi trên mọi máy.
+- Trước khi đổi driver, ghi lại COM, INF và phiên bản hiện tại, đóng Serial
+  Monitor/Arduino IDE và sao lưu package driver. Việc xóa package có thể ảnh
+  hưởng mọi thiết bị CH34x dùng chung driver; Windows Update cũng có thể cài lại
+  bản mới.
+- Sau rollback phải xác nhận thiết bị ở trạng thái `OK`, đúng phiên bản mong
+  muốn và upload/telemetry mới thực sự chạy. Chỉ thấy tên COM chưa đủ chứng minh
+  firmware hay cảm biến hoạt động.
+
 ### MAX30102 không thấy ở `0x57`
 
 - Kiểm tra SDA D2/GPIO4, SCL D1/GPIO5 và GND chung.
@@ -127,23 +141,27 @@ best-effort đã chấp nhận, không dùng kênh này cho tình huống cấp 
   hòa sau startup overflow là lỗi. Một số module cần tiêu thụ một mẫu hoàn chỉnh
   trước khi counter trở lại bình thường, nên clear-and-return trước khi đọc có
   thể tự khóa đường FIFO.
-- Sửa lỗi đã được kiểm tra trên `0.2.2` và được giữ trong source `0.3.0`:
+- Sửa lỗi đã được kiểm tra trên `0.2.2` và được giữ trong source `0.3.1`:
   pre-read `OVF_COUNTER` không còn là gate. Firmware vẫn fail-closed khi khoảng
   gọi MAX30102 vượt `250 ms` hoặc SparkFun `check()` fetch từ bốn mẫu vào buffer
-  cục bộ; khi đó cửa sổ PPG cũ bị hủy có chủ đích. Điều này không phải bằng
-  chứng rằng `0.3.0` đã được upload.
+  cục bộ; khi đó cửa sổ PPG cũ bị hủy có chủ đích.
 - Diagnostic đã thấy khoảng 25 mẫu/s, gap tối đa 10–37 ms và không có local
   storage hit. IR không-ngón-tay khoảng 812–853; probe với ngón tay đạt khoảng
   219.000–225.000. Trên production `0.2.2`, 20 mẫu liên tiếp sau đó có
   `finger_present=true`, PPG 0,66–0,81 và HR/SpO₂ hợp lệ. Đây là bring-up
   pipeline, không xác nhận độ chính xác y tế.
+- Capture trước hard reset có `ppg_sample_loss`. Sau hard reset, MAX30102 đã
+  khởi tạo và không còn unavailable hoặc `ppg_sample_loss`; do chưa đặt ngón
+  tay, `finger_present=false` và HR/SpO₂ là `null` đúng fail-closed. Đây vẫn
+  chưa phải HR/SpO₂ pass mới; đặt ngón tay ổn định, che sáng và chờ một cửa sổ
+  PPG sạch trước khi đánh giá tiếp.
 - Đặt ngón tay phủ đúng LED/photodiode, giữ lực ổn định và che ánh sáng ngoài.
   Chỉ kết luận đạt khi telemetry mới có HR/SpO₂ cùng cờ hợp lệ phù hợp; không
   diễn giải raw IR thành số đo sức khỏe.
 
 ### MPU-6050/MPU-6500-compatible không hoạt động
 
-- Logic đã được kiểm tra trên `0.2.2` và giữ trong source `0.3.0` thăm dò địa
+- Logic đã được kiểm tra trên `0.2.2` và giữ trong source `0.3.1` thăm dò địa
   chỉ I2C `0x68`; giữ AD0 ở mức thấp. Nếu scanner
   chỉ thấy `0x69`, sửa mức AD0/dây nối thay vì đổi kết luận từ tên sản phẩm.
 - Sau khi ACK tại `0x68`, đọc thanh ghi `WHO_AM_I` ở `0x75`. Chỉ `0x68`
@@ -151,12 +169,10 @@ best-effort đã chấp nhận, không dùng kênh này cho tình huống cấp 
   giá trị nhận dạng `0x68` là hai phép kiểm tra khác nhau.
 - Tiếp tục đọc đủ 14 byte từ `0x3B` đến `0x48`. NACK, ID khác hoặc frame thiếu
   nghĩa là chưa đạt, dù I2C scanner đã thấy địa chỉ.
-- Khi kiểm thử source `0.3.0` trong một phiên upload được cho phép sau này, yêu
-  cầu telemetry v3 mới cùng boot có `seq` tăng, `quality.motion_valid=true`,
-  `motion.accel_g`/`motion.gyro_dps` hữu hạn và không có
-  `mpu6050_unavailable`. Gia tốc đứng yên nên hợp lý quanh 1 g sau khi đặt
-  module ổn định; đây chỉ là bring-up, không phải hiệu chuẩn. Bằng chứng tương
-  đương đã có trên `0.2.2`, không tự chuyển thành bằng chứng cho `0.3.0`.
+- Telemetry `0.3.1` mới cùng boot `a164b119f1fd90b3`, `seq=23/25/28` đã có
+  `quality.motion_valid=true`, `fall_state="idle"` và `sensor_faults=[]`. Vẫn cần kiểm
+  tra accel/gyro hữu hạn, đứng yên hợp lý quanh 1 g và thay đổi khi xoay module;
+  đây chỉ là bring-up, không phải hiệu chuẩn.
 - Mã `mpu6050_unavailable` được cố ý giữ cho cả hai biến thể nhằm tương thích
   edge/dashboard; nó không chứng minh module là MPU-6050.
 - Kiểm tra cùng bus I2C với MAX30102 và nguồn 3,3 V logic. Nếu từng cảm biến
@@ -171,16 +187,22 @@ best-effort đã chấp nhận, không dùng kênh này cho tình huống cấp 
   parasite-power.
 - Bắt buộc có điện trở 4,7 kΩ từ DATA lên **3V3**. Không kéo GPIO ESP8266 lên
   5 V; giữ dây gọn và tránh tải gây nhiễu.
-- Source `0.3.0` đặt độ phân giải 12-bit, gọi chuyển đổi bất đồng bộ và chỉ đọc
+- Source `0.3.1` bật pull-up nội yếu của ESP8266 như fallback cho dây prototype
+  ngắn. Fallback này không thay thế điện trở ngoài 4,7 kΩ cho wearable ổn định.
+- Source `0.3.1` đặt độ phân giải 12-bit, gọi chuyển đổi bất đồng bộ và chỉ đọc
   sau ít nhất `750 ms`. Nếu code chờ `delay(750)` hoặc polling bận, MAX30102,
   motion/MQTT có thể mất nhịp; đó là lỗi triển khai, không phải cách khắc phục.
 - Lỗi phải vẫn phát v3 với `wearable.wrist_surface_temp_c=null`,
   `quality.wrist_surface_temp_valid=false` và fault `ds18b20_unavailable`.
 - Giá trị hợp lệ chỉ là nhiệt độ bề mặt tại điểm tiếp xúc, không phải nhiệt độ
   cơ thể/lõi, không kết luận sốt và không tạo alert sức khỏe/Telegram.
-- Source `0.3.0` chưa được upload và chưa có số đọc DS18B20 vật lý được xác
-  nhận. Dùng checklist phần cứng ở trạng thái chưa hoàn thành cho tới khi có
-  telemetry mới sau một phiên upload riêng được cho phép.
+- Scanner A/B 2026-08-14 không tìm thấy ROM trong nhánh `external_only`; nhánh
+  có fallback pull-up nội tìm được family `0x28`, CRC hợp lệ, addressed power
+  ở chế độ powered và `27.3125 °C`. Production `0.3.1` sau hard reset phát
+  `27.3125 °C`, nhiệt độ/motion hợp lệ và `sensor_faults=[]` tại
+  `seq=23/25/28`.
+  External-only chưa enumerate được ROM vẫn là tín hiệu phải kiểm tra lại điện
+  trở, mối hàn và dây trước khi đóng thành wearable.
 
 ### ESP8266 reset/ngắt MQTT
 

@@ -16,7 +16,7 @@ trong topic. JSON không được chứa `NaN`/`Infinity` hoặc field ngoài sc
 
 ## Telemetry hiện hành `health.telemetry.v3`
 
-Source firmware `0.3.0` và simulator hiện hành phát cấu trúc sau:
+Source firmware `0.3.1` và simulator hiện hành phát cấu trúc sau:
 
 ```json
 {
@@ -49,7 +49,7 @@ Source firmware `0.3.0` và simulator hiện hành phát cấu trúc sau:
   "system": {
     "rssi_dbm": -55,
     "free_heap": 36120,
-    "fw": "0.3.0",
+    "fw": "0.3.1",
     "faults": []
   }
 }
@@ -79,13 +79,13 @@ Quy tắc chung:
 - Khi `motion_artifact=true`, HR và SpO₂ phải không hợp lệ. Nếu
   `motion_valid=false`, `accel_g`/`gyro_dps` là `null` và
   `fall_state="unknown"`.
-- Source firmware `0.3.0` tiếp tục hỗ trợ MPU-6050 (`WHO_AM_I=0x68`) và module
+- Source firmware `0.3.1` tiếp tục hỗ trợ MPU-6050 (`WHO_AM_I=0x68`) và module
   MPU-6500-compatible (`WHO_AM_I=0x70`) tại cùng địa chỉ I2C `0x68`. Danh tính
   IMU không được thêm vào payload; cả hai biến thể dùng cùng field motion và
   tiếp tục báo mã tương thích ngược `mpu6050_unavailable` khi lỗi.
 - HR hoặc SpO₂ hợp lệ còn yêu cầu `quality.ppg` khác `null`, có ngón tay và
   `motion_valid=true`.
-- Source firmware `0.3.0` giữ sửa lỗi đã được kiểm tra ở `0.2.2`: không dùng
+- Source firmware `0.3.1` giữ sửa lỗi đã được kiểm tra ở `0.2.2`: không dùng
   pre-read `OVF_COUNTER` của MAX30102 làm gate.
   Cửa sổ PPG vẫn bị xóa, HR/SpO₂ thành `null` và cờ hợp lệ thành `false` nếu
   khoảng lấy mẫu vượt `250 ms` hoặc SparkFun `check()` fetch từ bốn mẫu vào
@@ -94,9 +94,18 @@ Quy tắc chung:
   `ds18b20_unavailable`, firmware có thể báo `mpu6050_unavailable`,
   `ppg_sample_loss` hoặc `event_queue_overflow`.
 
-Firmware `0.3.0` yêu cầu chuyển đổi DS18B20 12-bit bất đồng bộ và đọc kết quả
-sau ít nhất `750 ms`; payload không nói rằng vòng lặp đã chờ. Source `0.3.0`
-chưa được upload và chưa có số đọc DS18B20 vật lý được xác nhận.
+Firmware `0.3.1` yêu cầu chuyển đổi DS18B20 12-bit bất đồng bộ và đọc kết quả
+sau ít nhất `750 ms`; payload không nói rằng vòng lặp đã chờ. Pull-up nội yếu
+chỉ là fallback prototype, không thay đổi contract và không thay thế pull-up
+ngoài 4,7 kΩ của wearable.
+
+Bring-up phần cứng 2026-08-14 đã nhận v3 sau hard reset từ boot
+`a164b119f1fd90b3` tại `seq=23/25/28`: nhiệt độ `27.3125 °C`,
+`wrist_surface_temp_valid=true`, `motion_valid=true`, `fall_state="idle"` và
+`sensor_faults=[]` ở cả ba mẫu. MAX30102 không còn unavailable hoặc
+`ppg_sample_loss`, nhưng `finger_present=false` nên HR/SpO₂ là `null` đúng
+contract. Đây là bằng chứng contract/pipeline, không phải hiệu chuẩn cảm biến
+hoặc xác nhận độ chính xác y tế.
 
 ## Tương thích telemetry v1/v2 và dữ liệu lịch sử
 
@@ -151,7 +160,7 @@ trạng thái. Đây chỉ là nghi ngờ ngã trong demo, luôn cần người 
   "system": {
     "rssi_dbm": -55,
     "free_heap": 35980,
-    "fw": "0.3.0",
+    "fw": "0.3.1",
     "faults": []
   }
 }

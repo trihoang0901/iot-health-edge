@@ -28,10 +28,14 @@ The ESP8266 GPIO pins are not 5 V tolerant.
 A DS18B20 DATA line needs a **4.7 kOhm pull-up to 3.3 V**. Connect VDD to 3.3 V,
 GND to the common ground, and DATA to D5/GPIO14. Parasite-power mode is rejected
 because the asynchronous conversion path does not provide a strong pull-up.
+Firmware `0.3.1` also enables the ESP8266's weak internal pull-up as a fallback
+for short prototype wiring. That fallback is not a substitute for the external
+4.7 kOhm resistor; a stable wearable build still requires the external
+DATA-to-3.3 V pull-up.
 The probe reports local wrist-surface contact temperature only; it does not
 measure core body temperature and is not a clinical thermometer.
 
-Firmware `0.3.0` probes the motion sensor at I2C address `0x68` and then reads
+Firmware `0.3.1` probes the motion sensor at I2C address `0x68` and then reads
 register `WHO_AM_I` (`0x75`). It accepts only `0x68` for MPU-6050 or `0x70` for
 an MPU-6500-compatible device. The I2C address and identity value are different
 checks: an address scan alone is not proof that the supported sensor is ready.
@@ -109,7 +113,7 @@ flood the broker with stale readings.
 ## Bounded sampling behavior
 
 - The supported MPU-6050/MPU-6500-compatible motion sensor is sampled at 50 Hz.
-- MAX30102 is drained every loop. Firmware `0.3.0` retains the `0.2.2` recovery
+- MAX30102 is drained every loop. Firmware `0.3.1` retains the `0.2.2` recovery
   behavior and does not reject a read from
   a pre-read `OVF_COUNTER`: after a startup overflow, a saturated counter can
   require a complete sample to be consumed before it clears, so using it as a
@@ -123,6 +127,8 @@ flood the broker with stale readings.
   ROM with addressed 1-Wire operations, requests a conversion, continues
   servicing MAX30102, motion, Wi-Fi, and MQTT for 750 ms, then reads the saved
   family-`0x28` address. There is no conversion delay in the application loop.
+  The internal ESP8266 pull-up is only a prototype fail-safe; the external
+  4.7 kOhm pull-up remains part of the supported wearable wiring.
   Missing, parasite-powered, disconnected, power-on-reset, insufficient-power,
   85 °C startup, non-finite, or out-of-range readings publish `null` with
   `ds18b20_unavailable`; discovery retries after 10 seconds.
@@ -162,9 +168,19 @@ ms, and zero local-storage overflow hits. No-finger IR was about 812-853; an
 earlier finger probe reached about 219,000-225,000. These values prove sensor
 response, not medical accuracy. A later production check on firmware `0.2.2`
 recorded 20 consecutive samples with `finger_present=true`, PPG quality
-0.66-0.81, and valid HR/SpO2 outputs with stable placement. Firmware `0.3.0`
-and its DS18B20 migration have not been uploaded, so that historical result does
-not verify the current build on physical hardware.
+0.66-0.81, and valid HR/SpO2 outputs with stable placement. Firmware `0.3.1`
+was uploaded during the 2026-08-14 bring-up after the host CH340 driver was
+rolled back from `3.9.2024.9` to `3.7.2022.1`. An A/B scanner found no ROM in
+the `external_only` branch; with the internal-pull-up fallback it found a valid
+family-`0x28` ROM, valid CRC, addressed external power, and `27.3125 °C`.
+After a hard reset, production boot `a164b119f1fd90b3` reported firmware
+`0.3.1`, Wi-Fi at `192.168.137.37`, and MQTT connected. Fresh telemetry at
+sequences 23, 25, and 28 reported `27.3125 °C`, valid wrist temperature,
+valid/idle motion, and an empty `sensor_faults` list in all three samples.
+MAX30102 no longer reported unavailable or `ppg_sample_loss`; because no finger
+was present, HR and SpO2 correctly remained `null`. The dashboard showed the
+node online, `27.3 °C` valid, firmware `0.3.1`, and no browser errors. This is
+still not a new finger-present HR/SpO2 pass.
 
 DS18B20 reports wrist-surface contact temperature only. A value within the
 firmware's 0-50 °C validity range does not imply calibration, core-temperature

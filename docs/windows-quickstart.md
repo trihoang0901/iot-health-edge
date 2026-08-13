@@ -153,13 +153,14 @@ Ngưỡng demo có khoảng giữ mặc định nên `low_spo2`/`high_hr` cần 
    pio device monitor --baud 115200
    ```
 
-8. Source hiện tại là firmware `0.3.0`, nhưng migration này không thực hiện
-   upload. Trước khi có một lần upload phần cứng được chủ động cho phép, node
-   đang chạy `0.2.2`/telemetry v2 là trạng thái lịch sử bình thường, không phải
-   bằng chứng rằng v3 đã lỗi. Khi kiểm thử `0.3.0` trong một phiên phần cứng sau,
-   chỉ đánh dấu đạt nếu Serial có `wifi_connected`/`mqtt_connected`, broker thấy
-   client, API có bản tin mới `health.telemetry.v3`, `system.fw="0.3.0"`, `seq`
-   tăng và thiết bị `online=true`.
+8. Source hiện tại là firmware `0.3.1` và đã được upload trong phiên bring-up
+   2026-08-14. Sau hard reset, Serial boot `a164b119f1fd90b3` báo firmware
+   `0.3.1`, `wifi_connected ip=192.168.137.37` và `mqtt_connected`. API nhận
+   `health.telemetry.v3` tại `seq=23/25/28`, nhiệt độ `27.3125 °C`, motion
+   hợp lệ/`idle` và `sensor_faults=[]`. Máy Windows của phiên thử đã rollback driver CH340 từ
+   `3.9.2024.9` xuống `3.7.2022.1`; không tự áp dụng rollback này trên máy khác
+   nếu COM/upload vẫn hoạt động. Mỗi lần nạp sau vẫn phải xác nhận telemetry mới
+   có `system.fw="0.3.1"`, `seq` tăng và thiết bị `online=true`.
 9. Với cảm biến chuyển động, I2C scanner phải thấy địa chỉ `0x68`, nhưng ACK
    này chưa phải kết quả đạt. Đọc tiếp `WHO_AM_I` (`0x75`): `0x68` là
    MPU-6050, `0x70` là MPU-6500-compatible. Sau đó xác nhận đọc đủ 14 byte từ
@@ -174,12 +175,19 @@ Ngưỡng demo có khoảng giữ mặc định nên `low_spo2`/`high_hr` cần 
     từ bốn mẫu. Chỉ đánh dấu HR/SpO₂ đạt sau khi telemetry cuối có giá trị và cờ
     hợp lệ đúng; raw quang học riêng lẻ chưa đủ.
 11. DS18B20 phải ở powered three-wire: VDD=3V3, GND chung, DATA=D5/GPIO14 và
-    pull-up 4,7 kΩ từ DATA lên 3V3. Source `0.3.0` yêu cầu chuyển đổi 12-bit bất
-    đồng bộ rồi đọc sau ít nhất `750 ms`; không chờ bằng `delay(750)`. Khi cảm
-    biến lỗi, v3 phải phát `wearable.wrist_surface_temp_c=null`,
+    pull-up ngoài 4,7 kΩ từ DATA lên 3V3. Source `0.3.1` bật thêm pull-up nội yếu
+    như fallback prototype và yêu cầu chuyển đổi 12-bit bất đồng bộ rồi đọc sau
+    ít nhất `750 ms`; không chờ bằng `delay(750)`. Scanner A/B của phiên thử
+    không tìm thấy ROM ở `external_only`, nhưng nhánh có fallback pull-up nội
+    tìm được family `0x28`, CRC hợp lệ, powered và `27.3125 °C`. Kết quả này
+    không cho phép bỏ điện trở ngoài trên wearable. Khi cảm biến lỗi, v3 vẫn
+    phải phát `wearable.wrist_surface_temp_c=null`,
     `quality.wrist_surface_temp_valid=false`, fault `ds18b20_unavailable` và
-    vẫn duy trì MAX30102, dual-MPU cùng MQTT. Chưa có upload/số đọc DS18B20 vật
-    lý trong migration hiện tại, nên chưa đánh dấu mục này đạt.
+    duy trì MAX30102, dual-MPU cùng MQTT. Sau hard reset, MAX30102 không còn
+    unavailable hoặc `ppg_sample_loss`; chưa đặt ngón tay nên HR/SpO₂ là `null`
+    đúng fail-closed và vẫn cần retest ngón tay riêng. Dashboard đã hiển thị
+    online, nhiệt độ `27.3 °C` hợp lệ, firmware `0.3.1` và không có lỗi trình
+    duyệt.
 
 Launcher trên cố ý dành cho broker local. Nếu kiến trúc dùng broker đầu xa,
 không bỏ qua gate bằng cách giả địa chỉ local; dùng quy trình thủ công và các

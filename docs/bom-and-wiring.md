@@ -8,7 +8,7 @@
 | MAX30102 | Tín hiệu quang để ước lượng HR/SpO₂ demo |
 | MPU-6050 hoặc MPU-6500-compatible | Gia tốc/con quay và phát hiện ngã demo |
 | DS18B20 chống nước, ba dây | Nhiệt độ bề mặt tại điểm tiếp xúc cổ tay |
-| Điện trở 4,7 kΩ | Pull-up bắt buộc từ DATA DS18B20 lên 3V3 |
+| Điện trở 4,7 kΩ | Pull-up ngoài bắt buộc từ DATA DS18B20 lên 3V3 |
 
 DS18B20 chỉ mô tả nhiệt độ bề mặt tại điểm tiếp xúc. Không diễn giải thành
 nhiệt độ cơ thể/lõi, không kết luận sốt và không dùng làm cảnh báo sức khỏe.
@@ -36,7 +36,7 @@ khi cấp nguồn. Thiết kế này dùng powered three-wire, không dùng para
 | D2 | GPIO4 | SDA MAX30102 + SDA MPU motion | Bus I²C dùng chung |
 | D5 | GPIO14 | DATA DS18B20 | Điện trở 4,7 kΩ từ DATA lên 3V3 |
 
-MAX30102 thường ở địa chỉ `0x57`. Source `0.3.0` giữ cấu hình đã được kiểm tra
+MAX30102 thường ở địa chỉ `0x57`. Source `0.3.1` giữ cấu hình đã được kiểm tra
 trên `0.2.2`: địa chỉ `0x68` cho cả MPU-6050 và module MPU-6500-compatible, vì
 vậy AD0 phải ở mức thấp. Giá trị
 `WHO_AM_I` đọc từ thanh ghi `0x75` là `0x68` cho MPU-6050 hoặc `0x70` cho biến
@@ -57,6 +57,9 @@ NodeMCU GND ----------- GND chung
 
 Không nối tắt VDD xuống GND để dùng parasite-power. Powered three-wire là cấu
 hình duy nhất của kế hoạch này: VDD=3V3, DATA=D5/GPIO14, GND=GND chung.
+Firmware `0.3.1` bật thêm pull-up nội yếu của ESP8266 như một fallback cho dây
+prototype ngắn. Pull-up nội không có giá trị thay thế điện trở ngoài: bản
+wearable ổn định vẫn phải lắp đúng 4,7 kΩ từ DATA lên 3V3.
 
 ## Kiểm tra trước khi cấp nguồn
 
@@ -73,7 +76,9 @@ hình duy nhất của kế hoạch này: VDD=3V3, DATA=D5/GPIO14, GND=GND chung
 Sau khi cấp nguồn, chưa đánh dấu phần cứng MPU đạt chỉ vì scanner thấy `0x68`.
 Phải đọc `WHO_AM_I` và chỉ chấp nhận `0x68` hoặc `0x70`, đọc đủ 14 byte từ
 `0x3B`, rồi xác nhận firmware đang chạy phát số gia tốc/con quay hữu hạn mới.
-Lần kiểm tra phần cứng trước đã đạt trên `0.2.2`; source `0.3.0` chưa upload.
+Telemetry `0.3.1` sau hard reset trong boot `a164b119f1fd90b3`,
+`seq=23/25/28` đã có motion hợp lệ/`idle` và `sensor_faults=[]`; đây là bring-up
+phần cứng, không phải hiệu chuẩn phát hiện ngã.
 Phát hiện ngã vẫn chỉ là tính năng demo phi lâm sàng; không thử ngã trên người.
 
 Với MAX30102, ACK tại `0x57` chưa đủ. Firmware `0.2.2` đã được nạp và kiểm
@@ -82,9 +87,18 @@ không dùng pre-read `OVF_COUNTER` làm gate, nhưng vẫn hủy cửa sổ PPG
 lấy mẫu vượt `250 ms` hoặc SparkFun `check()` fetch từ bốn mẫu. Số quang thô
 không phải bằng chứng HR/SpO₂ cuối hay độ chính xác y tế.
 
-Source firmware `0.3.0` đặt DS18B20 ở 12-bit, gọi yêu cầu chuyển đổi bất đồng bộ
+Source firmware `0.3.1` đặt DS18B20 ở 12-bit, gọi yêu cầu chuyển đổi bất đồng bộ
 rồi chỉ đọc sau ít nhất `750 ms`; không `delay(750)` hoặc chờ bận trong vòng
 lặp. Lỗi/thiếu đầu dò phải phát `wearable.wrist_surface_temp_c=null`,
 `quality.wrist_surface_temp_valid=false` và fault `ds18b20_unavailable` mà
-không dừng MAX30102, dual-MPU, Wi-Fi hay MQTT. Source này chưa được upload và
-chưa có số đọc DS18B20 vật lý được xác nhận.
+không dừng MAX30102, dual-MPU, Wi-Fi hay MQTT. Trong bring-up 2026-08-14,
+scanner `external_only` chưa tìm thấy ROM; nhánh có fallback pull-up nội tìm
+được family `0x28`, CRC hợp lệ, nguồn addressed ở chế độ powered và
+`27.3125 °C`. Telemetry production sau hard reset có nhiệt độ `27.3125 °C`, cờ
+hợp lệ và không có sensor fault tại `seq=23/25/28`. Kết quả A/B này cho thấy
+fallback hữu ích khi thử nhanh, không chứng minh có thể bỏ điện trở ngoài
+4,7 kΩ.
+
+Máy bring-up cũng rollback driver CH340 từ `3.9.2024.9` xuống `3.7.2022.1`
+trước phiên upload. Đây là biến môi trường host cần ghi lại, không phải quy tắc
+rằng mọi NodeMCU đều phải hạ driver.

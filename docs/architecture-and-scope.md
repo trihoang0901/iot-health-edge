@@ -35,6 +35,9 @@ iot-health/v1/devices/{device_id}/status
 - DS18B20 dùng chế độ cấp nguồn ba dây trên D5/GPIO14 để lấy nhiệt độ bề mặt tại
   điểm tiếp xúc cổ tay. Firmware khởi phát chuyển đổi 12-bit bất đồng bộ và đọc
   sau ít nhất `750 ms`; vòng lặp MAX30102, motion và MQTT không chờ chuyển đổi.
+  Firmware `0.3.1` bật pull-up nội yếu như fallback cho dây prototype ngắn,
+  nhưng bản wearable ổn định vẫn bắt buộc có điện trở ngoài 4,7 kΩ từ DATA lên
+  3V3.
   Giá trị không phải nhiệt độ cơ thể/lõi, không dùng kết luận sốt và không tham
   gia luật cảnh báo sức khỏe.
 - Mosquitto xác thực username/password và giới hạn topic bằng ACL.
@@ -67,7 +70,7 @@ Một số đo không hợp lệ phải là `null` và cờ `*_valid` tương �
 sát máy trạng thái. Event vẫn chỉ là tín hiệu demo cần người kiểm tra, không
 phải kết luận có người đã ngã.
 
-Source firmware `0.3.0` phát `health.telemetry.v3`. Edge phân luồng nghiêm ngặt
+Source firmware `0.3.1` phát `health.telemetry.v3`. Edge phân luồng nghiêm ngặt
 theo trường `schema`, đồng thời tiếp tục nhận `health.telemetry.v1` và v2.
 Migration SQLite chỉ thêm cột nhiệt độ cổ tay/cờ hợp lệ dạng nullable/defaulted;
 các cột, bản ghi và raw payload `skin_temp_*` v1 cùng environment DHT11 v2 được
@@ -82,8 +85,12 @@ có thể bão hòa sau startup overflow và tự khóa vòng clear-and-return t
 một mẫu hoàn chỉnh được tiêu thụ. Cửa sổ PPG vẫn bị xóa và đánh dấu không hợp lệ
 khi khoảng lấy mẫu vượt `250 ms` hoặc SparkFun `check()` fetch từ bốn mẫu. Tín
 hiệu red/IR thô và telemetry HR/SpO₂ hợp lệ đã được ghi nhận trên `0.2.2`, nhưng
-không tự chứng minh độ chính xác y tế. Source `0.3.0` giữ đường MAX/dual-MPU này;
-`0.3.0` chưa được upload và chưa có phép đọc DS18B20 vật lý được xác nhận.
+không tự chứng minh độ chính xác y tế. Source `0.3.1` giữ đường MAX/dual-MPU này
+và đã có telemetry phần cứng mới sau hard reset trong boot
+`a164b119f1fd90b3`, `seq=23/25/28`: nhiệt độ cổ tay `27.3125 °C`, motion
+hợp lệ/`idle` và `sensor_faults=[]`. MAX30102 không còn unavailable hoặc
+`ppg_sample_loss`; không có ngón tay nên HR/SpO₂ là `null` đúng fail-closed và
+chưa tạo bằng chứng HR/SpO₂ mới trên `0.3.1`.
 
 Edge giới hạn hàng đợi RAM và kích thước MQTT payload. SQLite chỉ giữ số hàng
 telemetry mới nhất theo từng thiết bị (`EDGE_TELEMETRY_RETENTION_ROWS`, mặc định

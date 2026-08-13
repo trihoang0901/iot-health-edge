@@ -62,11 +62,16 @@ Sau mỗi alert, ACK trên dashboard và xác nhận actor/note/thời điểm �
       tạo fault tương thích ngược `mpu6050_unavailable`, không phát số cũ/giả.
 - [ ] DS18B20 ở powered three-wire: VDD=3V3, GND chung, DATA=D5/GPIO14 và
       pull-up **4,7 kΩ** từ DATA lên 3V3; không dùng parasite-power.
-- [x] Source `0.3.0` yêu cầu chuyển đổi 12-bit bất đồng bộ và chỉ đọc sau ít
+- [x] Source `0.3.1` yêu cầu chuyển đổi 12-bit bất đồng bộ và chỉ đọc sau ít
       nhất `750 ms`; không có `delay(750)`/busy wait trong vòng sampling.
-- [ ] Khi hợp lệ, v3 phát đúng `wearable.wrist_surface_temp_c` và
+- [x] Khi hợp lệ, v3 phát đúng `wearable.wrist_surface_temp_c` và
       `quality.wrist_surface_temp_valid=true`; khi lỗi phát null/false cùng
-      `ds18b20_unavailable` mà node vẫn online.
+      `ds18b20_unavailable` mà node vẫn online. Boot `a164b119f1fd90b3` tại
+      `seq=23/25/28` đã có `27.3125 °C` hợp lệ và `sensor_faults=[]`.
+- [x] Scanner A/B ghi nhận `external_only` không tìm thấy ROM; với fallback
+      pull-up nội tìm được family `0x28`, CRC hợp lệ, addressed power ở chế độ
+      powered và `27.3125 °C`. Mục wiring 4,7 kΩ phía trên vẫn để chưa hoàn
+      thành vì pull-up nội không thay thế phần cứng wearable ổn định.
 - [ ] Đọc từng cảm biến riêng ổn định trước khi ghép.
 - [ ] Khi ghép, MQTT, MAX30102 và dual-MPU không mất nhịp trong lúc DS18B20
       đang chuyển đổi.
@@ -77,8 +82,12 @@ Sau mỗi alert, ACK trên dashboard và xác nhận actor/note/thời điểm �
 - [x] Clean build và upload firmware `0.2.2`; broker/API nhận boot mới, node
       online và telemetry mới có `seq` tăng. Diagnostic xác nhận không còn vòng
       clear-and-return do `OVF_COUNTER`.
-- [x] Clean build source firmware `0.3.0` và full automated tests. Không upload
-      trong migration này; không đánh dấu DS18B20 vật lý đạt từ build/simulator.
+- [x] Clean build và full automated tests đã qua ở baseline migration;
+      firmware `0.3.1` sau đó đã build/upload và có telemetry phần cứng mới.
+      Không suy ra độ chính xác y tế từ build hoặc số đọc đơn lẻ.
+- [x] Host bring-up rollback driver CH340 từ `3.9.2024.9` xuống `3.7.2022.1`
+      trước upload; ghi đây là biến môi trường của phiên thử, không phải yêu cầu
+      chung cho mọi NodeMCU.
 - [ ] Thử cưỡng bức gap `>250 ms` và SparkFun fetch `>=4`; xác nhận cửa sổ bị
       xóa, phát `ppg_sample_loss` và không phát số cũ.
 - [x] Đặt ngón tay đúng, ổn định và che sáng: 20 mẫu production liên tiếp có
@@ -93,6 +102,14 @@ Sau mỗi alert, ACK trên dashboard và xác nhận actor/note/thời điểm �
       hữu hạn và không còn `mpu6050_unavailable`.
 - [ ] Khi module đứng yên, gia tốc mới hợp lý quanh 1 g; xoay module làm
       accel/gyro thay đổi. Chỉ đánh dấu sau bằng chứng telemetry phần cứng mới.
+- [x] Telemetry `0.3.1` cùng boot `a164b119f1fd90b3`, `seq=23/25/28` có
+      `quality.motion_valid=true`, `fall_state="idle"` và `sensor_faults=[]`. Đây là kiểm tra pipeline,
+      không phải hiệu chuẩn ngã.
+- [x] Sau hard reset, MAX30102 đã khởi tạo và không còn unavailable hoặc
+      `ppg_sample_loss`; `finger_present=false` làm HR/SpO₂ `null` đúng
+      fail-closed.
+- [ ] Cần retest MAX30102 với ngón tay ổn định trước khi coi HR/SpO₂ hiện tại là
+      đạt.
 - [ ] Để offline đủ lâu làm tràn bốn event RAM: `event_queue_overflow` xuất hiện sau reconnect.
 - [ ] Nguồn/cáp không gây reset; `free_heap` còn biên an toàn trong 15 phút.
 
@@ -118,8 +135,12 @@ Sau mỗi alert, ACK trên dashboard và xác nhận actor/note/thời điểm �
 - [x] Báo cáo không tuyên bố chẩn đoán, độ chính xác y tế hoặc 5G khi chưa có bằng chứng.
 - [x] Báo cáo ghi rõ DS18B20 chỉ đo bề mặt tại điểm tiếp xúc, không phải nhiệt
       độ cơ thể/lõi, không kết luận sốt và không dùng làm alert sức khỏe.
-- [x] Báo cáo ghi rõ source `0.3.0` chưa upload/chưa có số đọc DS18B20 vật lý;
-      bằng chứng MAX/dual-MPU `0.2.2` được giữ riêng như lịch sử.
+- [x] Báo cáo ghi rõ `0.3.1` đã có bring-up DS18B20/motion vật lý, nhưng
+      external-only scanner chưa tìm thấy ROM và MAX hiện chưa có capture ngón
+      tay; bằng chứng MAX/dual-MPU `0.2.2` được giữ riêng như lịch sử, không bị
+      nâng thành độ chính xác y tế.
+- [x] Dashboard sau hard reset hiển thị node online, nhiệt độ `27.3 °C` hợp lệ,
+      firmware `0.3.1` và không có lỗi trình duyệt.
 
 ## G. Telegram tùy chọn
 
