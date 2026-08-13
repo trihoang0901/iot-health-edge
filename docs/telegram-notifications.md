@@ -79,10 +79,12 @@ báo phi lâm sàng. Quy tắc gửi là:
 
 - Ngưỡng SpO₂/nhịp tim: một tin khi alert mới mở; các telemetry tiếp theo chỉ
   cập nhật alert và không gửi thêm. Alert kết thúc rồi mở lại sẽ gửi tin mới.
-- Nhiệt độ và độ ẩm DHT11 chỉ là dữ liệu môi trường, không tạo alert sức khỏe
-  và không gửi Telegram. Mapping nhiệt độ cũ chỉ còn để trình bày lịch sử
-  `surface_temp_demo`; migration chuyển alert cũ đang mở sang `resolved` và
-  không đánh giá luật này cho telemetry mới.
+- `wearable.wrist_surface_temp_c` từ DS18B20 chỉ là nhiệt độ bề mặt tại điểm
+  tiếp xúc, không phải nhiệt độ cơ thể/lõi và không dùng kết luận sốt. Giá trị
+  này không tạo alert và không gửi Telegram, kể cả ở biên hợp lệ của contract.
+  Dữ liệu `skin_temp_*` v1 và environment DHT11 v2 chỉ được giữ để đọc lịch sử;
+  không schema legacy nào được ánh xạ thành nhiệt độ cổ tay. Mapping
+  `surface_temp_demo` cũ đã retired/resolved và không được đánh giá lại.
 - Ngã demo: mỗi `event_id` mới gửi một tin; bản MQTT phát lại cùng `event_id`
   không gửi lại.
 - ACK và resolved không gửi tin.

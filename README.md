@@ -1,11 +1,14 @@
 # IoT Health Edge MVP
 
 Prototype học tập **phi lâm sàng** dùng NodeMCU ESP8266, MAX30102, cảm biến
-chuyển động MPU-6050 hoặc MPU-6500-compatible và DHT11. Node gửi dữ liệu có
+chuyển động MPU-6050 hoặc MPU-6500-compatible và DS18B20 tiếp xúc bề mặt cổ tay. Node gửi dữ liệu có
 cờ chất lượng qua MQTT; laptop nhận, lưu SQLite, áp dụng luật cảnh báo demo và
 hiển thị dashboard tiếng Việt.
 
-Không dùng kết quả để chẩn đoán, điều trị, quyết định cấp cứu hoặc thay thế thiết bị y tế. DHT11 chỉ đo nhiệt độ/độ ẩm **môi trường**, không đo nhiệt độ da, nhiệt độ cơ thể hay nhiệt độ lõi và không kích hoạt cảnh báo sức khỏe.
+Không dùng kết quả để chẩn đoán, điều trị, quyết định cấp cứu hoặc thay thế
+thiết bị y tế. DS18B20 chỉ cung cấp nhiệt độ **bề mặt tại điểm tiếp xúc** cho
+prototype; giá trị này không phải nhiệt độ cơ thể/lõi, không dùng để kết luận
+sốt và không kích hoạt cảnh báo nhiệt độ.
 
 ## Chạy nhanh nhất: simulator trước, chưa cần cắm mạch
 
@@ -66,7 +69,7 @@ Mở `http://127.0.0.1:8000`. Các kịch bản có sẵn:
 
 ```powershell
 python -m simulator --scenario motion_artifact --count 20
-python -m simulator --scenario dht_fault --count 20
+python -m simulator --scenario ds18b20_fault --count 20
 python -m simulator --scenario low_spo2 --count 20
 python -m simulator --scenario high_hr --count 20
 python -m simulator --scenario fall --count 8
@@ -102,22 +105,33 @@ phi lâm sàng, không phải hệ thống cấp cứu.
    `MQTT_HOST` không khớp một IPv4 cục bộ đang hoạt động.
 5. Xem Serial Monitor trước, sau đó kiểm tra dashboard và [checklist](docs/test-checklist.md).
 
-Linh kiện cốt lõi người dùng đã có đủ. Breadboard, dây Dupont, cáp USB data và nguồn ổn định chỉ là vật tư hỗ trợ lắp thử. DHT11 dùng DATA tại D5/GPIO14; cảm biến rời bốn chân cần pull-up 4,7–10 kΩ lên 3V3, còn nhiều module ba chân đã có sẵn điện trở này. Buzzer/nút nhấn là tùy chọn; thao tác ACK chính nằm trên dashboard.
+Linh kiện cốt lõi người dùng đã có đủ. Breadboard, dây Dupont, cáp USB data và
+nguồn ổn định chỉ là vật tư hỗ trợ lắp thử. DS18B20 dùng chế độ cấp nguồn ba dây:
+VDD lên 3V3, GND chung, DATA tại D5/GPIO14 và điện trở **4,7 kΩ** từ DATA lên
+3V3. Không dùng parasite-power trong cấu hình này. Buzzer/nút nhấn là tùy chọn;
+thao tác ACK chính nằm trên dashboard.
 
-Firmware `0.2.2` phát `health.telemetry.v2` với `ambient_temp_c` và
-`humidity_pct`. Edge vẫn xác thực telemetry v1 và giữ nguyên dữ liệu
-`skin_temp_*` lịch sử trong SQLite; dữ liệu cũ không bị đổi nghĩa thành số đo
-DHT11. Firmware nhận MPU-6050 có `WHO_AM_I=0x68` hoặc module
+Source firmware `0.3.0` phát strict `health.telemetry.v3` với
+`wearable.wrist_surface_temp_c` và `quality.wrist_surface_temp_valid`. Phép
+chuyển đổi DS18B20 12-bit được yêu cầu bất đồng bộ rồi đọc sau ít nhất `750 ms`;
+vòng lặp không chờ bằng `delay()`. Edge tiếp tục xác thực v1/v2 và giữ nguyên
+dữ liệu `skin_temp_*`, môi trường DHT11 cùng raw payload lịch sử trong SQLite;
+không giá trị legacy nào bị đổi nghĩa thành nhiệt độ cổ tay. Firmware nhận
+MPU-6050 có `WHO_AM_I=0x68` hoặc module
 MPU-6500-compatible có `WHO_AM_I=0x70`, cùng ở địa chỉ I2C `0x68`. Mã lỗi công
 khai cũ `mpu6050_unavailable` được giữ lại cho cả hai biến thể để không phá vỡ
 edge/dashboard. Xem chi tiết trong [hợp đồng dữ liệu](docs/data-contract.md).
 
-Firmware `0.2.2` cũng sửa đường khôi phục FIFO MAX30102: không dùng giá trị
+Firmware `0.2.2` đã sửa và được kiểm tra trên phần cứng cho đường khôi phục FIFO
+MAX30102: không dùng giá trị
 `OVF_COUNTER` đọc trước mẫu làm gate, vì counter bão hòa sau overflow lúc khởi
 động có thể giữ node trong vòng clear-and-return. Cửa sổ PPG vẫn fail-closed khi
 khoảng lấy mẫu vượt `250 ms` hoặc `check()` của thư viện SparkFun trả về từ bốn
-mẫu trong buffer cục bộ. Đường quang thô đã được chứng minh; HR/SpO₂ cuối vẫn
-cần thử lại với ngón tay đặt đúng và ổn định.
+mẫu trong buffer cục bộ. Phiên `0.2.2` đã có raw quang học và 20 telemetry
+production liên tiếp với HR/SpO₂ hợp lệ khi đặt ngón tay ổn định; đây chỉ là
+bring-up phi lâm sàng, không chứng minh độ chính xác y tế. Source `0.3.0` giữ
+nguyên đường MAX/dual-MPU này nhưng **chưa được upload**; chưa có số đọc DS18B20
+vật lý nào được xác nhận cho `0.3.0`.
 
 ## Lưu ý về 5G
 

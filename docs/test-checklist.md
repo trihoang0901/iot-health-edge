@@ -6,9 +6,9 @@ Ghi ngày giờ, phiên bản firmware/edge, `device_id`, chế độ mạng và
 
 | Bài thử | Lệnh | Kỳ vọng |
 |---|---|---|
-| Contract không cần broker | `python -m simulator --scenario fall --count 8 --dry-run` | JSON hợp lệ; ba topic namespace v1, schema `health.telemetry.v2`; có đúng một event fall |
+| Contract không cần broker | `python -m simulator --scenario fall --count 8 --dry-run` | JSON hợp lệ; ba topic namespace v1, telemetry strict `health.telemetry.v3`; có đúng một event fall |
 | Bình thường | `python -m simulator --scenario normal --count 20` | Dashboard online, không có alert demo mới |
-| Lỗi DHT11 | `python -m simulator --scenario dht_fault --count 20` | Telemetry v2 vẫn tới edge; hai giá trị môi trường null, hai cờ false, có `dht11_unavailable`; không tạo alert |
+| Lỗi DS18B20 | `python -m simulator --scenario ds18b20_fault --count 20` | Telemetry v3 vẫn tới edge; `wearable.wrist_surface_temp_c=null`, cờ false, có `ds18b20_unavailable`; không tạo alert |
 | Nhiễu chuyển động | `python -m simulator --scenario motion_artifact --count 20` | HR/SpO₂ là null, cờ invalid; không sinh alert sinh hiệu |
 | SpO₂ thấp demo | `python -m simulator --scenario low_spo2 --count 20` | Alert demo sau hold time, không xuất hiện nếu cờ invalid |
 | HR cao demo | `python -m simulator --scenario high_hr --count 20` | Alert demo sau hold time |
@@ -22,15 +22,19 @@ Sau mỗi alert, ACK trên dashboard và xác nhận actor/note/thời điểm �
 - [ ] Topic có device ID khác payload bị từ chối.
 - [ ] `NaN`, field lạ và enum sai bị từ chối.
 - [ ] HR/SpO₂ có giá trị khi cờ invalid bị từ chối.
-- [ ] Nhiệt độ môi trường/độ ẩm có giá trị khi cờ tương ứng false bị từ chối;
-      giá trị hợp lệ phải nằm trong giới hạn contract.
+- [ ] `wrist_surface_temp_c` có giá trị khi
+      `wrist_surface_temp_valid=false` bị từ chối; giá trị hợp lệ phải hữu hạn
+      và nằm trong `0..50 °C`.
 - [ ] Motion invalid nhưng còn accel/gyro bị từ chối.
-- [ ] Telemetry v1 hợp lệ vẫn được nhận; telemetry v2 không chấp nhận
-      `skin_temp_*` hoặc field ngoài schema.
+- [ ] Telemetry v1/v2 hợp lệ vẫn được nhận; mỗi phiên bản từ chối field ngoài
+      schema và v3 không chấp nhận `skin_temp_*` hay `environment`.
 - [ ] Migration database cũ giữ nguyên bản ghi/cột `skin_temp_*`, đồng thời
-      thêm các cột schema/environment mà không yêu cầu xóa SQLite.
-- [ ] Dữ liệu DHT11, kể cả giá trị cực biên hợp lệ, không mở alert sức khỏe;
-      `surface_temp_demo` cũ không còn được đánh giá/quảng bá.
+      giữ cột environment v2, raw payload và thêm nullable/defaulted wrist
+      columns mà không yêu cầu xóa SQLite.
+- [ ] Dữ liệu DS18B20, kể cả `49.9 °C` hợp lệ theo contract, không mở alert sức
+      khỏe/sốt hoặc gửi Telegram; `surface_temp_demo` cũ không được khôi phục.
+- [ ] API normalization trả field không thuộc schema gốc là `null`/false; dữ
+      liệu nhiệt độ v1/v2 không bao giờ xuất hiện như nhiệt độ cổ tay.
 - [ ] Hai bản tin cùng `(device_id, boot_id, seq)` không tạo bản ghi/alert trùng.
 - [ ] Hai event cùng `(device_id, event_id)` chỉ mở một alert; hai thiết bị khác nhau được phép dùng cùng chuỗi `event_id`.
 - [ ] Payload vượt `EDGE_MAX_PAYLOAD_BYTES` bị từ chối và lịch sử mỗi thiết bị không vượt giới hạn retention đã đặt.
@@ -56,12 +60,16 @@ Sau mỗi alert, ACK trên dashboard và xác nhận actor/note/thời điểm �
       MPU-6500-compatible; ID khác phải fail closed.
 - [x] Đọc đủ frame 14 byte từ `0x3B`; NACK/frame thiếu làm motion invalid và
       tạo fault tương thích ngược `mpu6050_unavailable`, không phát số cũ/giả.
-- [ ] DHT11 DATA nối D5/GPIO14; cảm biến rời có pull-up 4,7–10 kΩ lên 3V3 hoặc
-      module được xác nhận đã có pull-up.
-- [ ] DHT11 không được đọc nhanh hơn hai giây; khi hợp lệ phát đồng thời nhiệt
-      độ/độ ẩm môi trường với cờ đúng.
+- [ ] DS18B20 ở powered three-wire: VDD=3V3, GND chung, DATA=D5/GPIO14 và
+      pull-up **4,7 kΩ** từ DATA lên 3V3; không dùng parasite-power.
+- [x] Source `0.3.0` yêu cầu chuyển đổi 12-bit bất đồng bộ và chỉ đọc sau ít
+      nhất `750 ms`; không có `delay(750)`/busy wait trong vòng sampling.
+- [ ] Khi hợp lệ, v3 phát đúng `wearable.wrist_surface_temp_c` và
+      `quality.wrist_surface_temp_valid=true`; khi lỗi phát null/false cùng
+      `ds18b20_unavailable` mà node vẫn online.
 - [ ] Đọc từng cảm biến riêng ổn định trước khi ghép.
-- [ ] Khi ghép, MQTT không rớt trong lúc đọc DHT11 hoặc thu FIFO MAX30102.
+- [ ] Khi ghép, MQTT, MAX30102 và dual-MPU không mất nhịp trong lúc DS18B20
+      đang chuyển đổi.
 - [ ] Che sáng/cố định ngón tay giúp điểm `ppg` ổn định hơn; nhiễu chuyển động làm cờ valid tắt.
 - [x] Diagnostic bỏ pre-read `OVF_COUNTER` nhận khoảng 25 mẫu/s, gap tối đa
       10–37 ms và `storage_hits=0`; no-finger IR khoảng 812–853, probe ngón tay
@@ -69,6 +77,8 @@ Sau mỗi alert, ACK trên dashboard và xác nhận actor/note/thời điểm �
 - [x] Clean build và upload firmware `0.2.2`; broker/API nhận boot mới, node
       online và telemetry mới có `seq` tăng. Diagnostic xác nhận không còn vòng
       clear-and-return do `OVF_COUNTER`.
+- [x] Clean build source firmware `0.3.0` và full automated tests. Không upload
+      trong migration này; không đánh dấu DS18B20 vật lý đạt từ build/simulator.
 - [ ] Thử cưỡng bức gap `>250 ms` và SparkFun fetch `>=4`; xác nhận cửa sổ bị
       xóa, phát `ppg_sample_loss` và không phát số cũ.
 - [x] Đặt ngón tay đúng, ổn định và che sáng: 20 mẫu production liên tiếp có
@@ -98,15 +108,18 @@ Sau mỗi alert, ACK trên dashboard và xác nhận actor/note/thời điểm �
 ## F. Tiêu chí bàn giao
 
 - [ ] Dashboard hiển thị cảnh báo phi lâm sàng rõ ràng.
-- [ ] Dashboard hiển thị bốn số đo: HR, SpO₂, nhiệt độ môi trường và độ ẩm;
-      dữ liệu cuối được đánh dấu stale khi node offline.
-- [ ] Tất cả scenario chạy lại được từ hướng dẫn Windows.
-- [ ] Automated tests của edge qua 100%.
-- [ ] Firmware build thành công khi có PlatformIO.
+- [x] Dashboard hiển thị ba số đo live: HR, SpO₂ và nhiệt độ bề mặt cổ tay;
+      không hiện DHT11/độ ẩm cho node mới, không relabel v1/v2, và dữ liệu cuối
+      được đánh dấu stale khi node offline.
+- [x] Tất cả scenario chạy lại được từ hướng dẫn Windows.
+- [x] Automated tests của edge qua 100%.
+- [x] Firmware build thành công khi có PlatformIO.
 - [ ] Không có credential thật trong artefact bàn giao.
-- [ ] Báo cáo không tuyên bố chẩn đoán, độ chính xác y tế hoặc 5G khi chưa có bằng chứng.
-- [ ] Báo cáo ghi rõ DHT11 không đo nhiệt độ da/cơ thể/lõi và không dùng DHT11
-      làm cảnh báo sức khỏe.
+- [x] Báo cáo không tuyên bố chẩn đoán, độ chính xác y tế hoặc 5G khi chưa có bằng chứng.
+- [x] Báo cáo ghi rõ DS18B20 chỉ đo bề mặt tại điểm tiếp xúc, không phải nhiệt
+      độ cơ thể/lõi, không kết luận sốt và không dùng làm alert sức khỏe.
+- [x] Báo cáo ghi rõ source `0.3.0` chưa upload/chưa có số đọc DS18B20 vật lý;
+      bằng chứng MAX/dual-MPU `0.2.2` được giữ riêng như lịch sử.
 
 ## G. Telegram tùy chọn
 

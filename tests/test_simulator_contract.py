@@ -116,33 +116,34 @@ def test_main_dry_run_prints_machine_readable_stream(monkeypatch, capsys):
     assert len(output) == 3
     assert output[0]["payload"]["online"] is True
     assert output[1]["topic"].endswith("/telemetry")
-    assert output[1]["payload"]["schema"] == "health.telemetry.v2"
+    assert output[1]["payload"]["schema"] == "health.telemetry.v3"
     assert output[2]["payload"]["online"] is False
 
 
-def test_normal_scenario_emits_strict_v2_environment_contract(monkeypatch, capsys):
+def test_normal_scenario_emits_strict_v3_wearable_contract(monkeypatch, capsys):
     monkeypatch.delenv("MQTT_TLS", raising=False)
 
     assert main(["--dry-run", "--scenario", "normal", "--count", "1"]) == 0
     output = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
     telemetry = output[1]["payload"]
 
-    assert telemetry["schema"] == "health.telemetry.v2"
+    assert telemetry["schema"] == "health.telemetry.v3"
     assert set(telemetry["vitals"]) == {"heart_rate_bpm", "spo2_pct"}
-    assert set(telemetry["environment"]) == {"ambient_temp_c", "humidity_pct"}
-    assert -40 <= telemetry["environment"]["ambient_temp_c"] <= 80
-    assert 0 <= telemetry["environment"]["humidity_pct"] <= 100
-    assert telemetry["quality"]["ambient_temp_valid"] is True
-    assert telemetry["quality"]["humidity_valid"] is True
+    assert set(telemetry["wearable"]) == {"wrist_surface_temp_c"}
+    assert 0 <= telemetry["wearable"]["wrist_surface_temp_c"] <= 50
+    assert telemetry["quality"]["wrist_surface_temp_valid"] is True
+    assert "environment" not in telemetry
+    assert "ambient_temp_valid" not in telemetry["quality"]
+    assert "humidity_valid" not in telemetry["quality"]
     assert "skin_temp_c" not in telemetry["vitals"]
     assert "skin_temp_valid" not in telemetry["quality"]
-    assert telemetry["system"]["fw"] == "simulator-1.1.0"
+    assert telemetry["system"]["fw"] == "simulator-1.2.0"
 
 
-def test_dht_fault_scenario_keeps_publishing_null_environment(monkeypatch, capsys):
+def test_ds18b20_fault_scenario_keeps_publishing_null_wrist_temperature(monkeypatch, capsys):
     monkeypatch.delenv("MQTT_TLS", raising=False)
 
-    assert main(["--dry-run", "--scenario", "dht_fault", "--count", "2"]) == 0
+    assert main(["--dry-run", "--scenario", "ds18b20_fault", "--count", "2"]) == 0
     output = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
     telemetry_messages = [
         item["payload"] for item in output if item["topic"].endswith("/telemetry")
@@ -150,14 +151,49 @@ def test_dht_fault_scenario_keeps_publishing_null_environment(monkeypatch, capsy
 
     assert len(telemetry_messages) == 2
     for telemetry in telemetry_messages:
-        assert telemetry["schema"] == "health.telemetry.v2"
-        assert telemetry["environment"] == {
-            "ambient_temp_c": None,
-            "humidity_pct": None,
-        }
-        assert telemetry["quality"]["ambient_temp_valid"] is False
-        assert telemetry["quality"]["humidity_valid"] is False
-        assert "dht11_unavailable" in telemetry["system"]["faults"]
+        assert telemetry["schema"] == "health.telemetry.v3"
+        assert telemetry["wearable"] == {"wrist_surface_temp_c": None}
+        assert telemetry["quality"]["wrist_surface_temp_valid"] is False
+        assert "ds18b20_unavailable" in telemetry["system"]["faults"]
+
+
+def test_high_valid_wrist_surface_temperature_never_opens_health_alert(tmp_path):
+    database = Database(tmp_path / "no-temperature-alert.db")
+    database.initialize()
+    service = IngestionService(
+        database,
+        RuleEngine(database, DemoRuleSettings(hold_seconds=0.0)),
+    )
+    stream = ScenarioStream(
+        RuntimeConfig(
+            broker="127.0.0.1",
+            port=1883,
+            username=None,
+            password=None,
+            device_id="health-node-01",
+            scenario="normal",
+            interval=1.0,
+            count=1,
+            seed=42,
+            tls=False,
+            ca_cert=None,
+            connect_timeout=1.0,
+            dry_run=True,
+        )
+    )
+    telemetry = stream.telemetry("normal", step=0, total=1)
+    telemetry.payload["wearable"]["wrist_surface_temp_c"] = 49.9
+
+    result = service.process_message(
+        InboundMessage(
+            topic=telemetry.topic,
+            payload=json.dumps(telemetry.payload, allow_nan=False).encode(),
+            received_at=datetime.now(UTC),
+        )
+    )
+
+    assert result.accepted is True
+    assert database.list_alerts(limit=20) == []
 
 
 @pytest.mark.parametrize(

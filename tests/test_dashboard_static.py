@@ -36,28 +36,30 @@ def parse_dashboard() -> tuple[DashboardParser, str]:
     return parser, html
 
 
-def test_dashboard_exposes_four_non_clinical_measurement_cards():
+def test_dashboard_exposes_three_non_clinical_measurement_cards():
     parser, html = parse_dashboard()
 
-    assert parser.metric_cards == 4
+    assert parser.metric_cards == 3
     assert len(parser.ids) == len(set(parser.ids))
-    assert {"heart-rate", "spo2", "ambient-temp", "humidity"} <= set(parser.ids)
-    assert "Nhiệt độ môi trường" in html
-    assert "Độ ẩm môi trường" in html
-    assert "không phải nhiệt độ cơ thể" in html
+    assert {"heart-rate", "spo2", "wrist-temp"} <= set(parser.ids)
+    assert "Nhiệt độ bề mặt cổ tay" in html
+    assert "không phải nhiệt độ cơ thể/lõi" in html
     assert "Prototype phi lâm sàng" in html
-    assert "Nhiệt độ bề mặt" not in html
+    assert "DHT11" not in html
+    assert "Độ ẩm môi trường" not in html
 
 
-def test_dashboard_charts_normalized_environment_values():
+def test_dashboard_charts_only_v3_wearable_temperature():
     parser, _html = parse_dashboard()
     script = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
 
-    assert {"ambient_temp_c", "humidity_pct"} <= set(parser.chart_metrics)
-    assert 'group: "environment"' in script
-    assert "latest.environment || {}" in script
-    assert "environment.ambient_temp_c" in script
-    assert "environment.humidity_pct" in script
+    assert "wrist_surface_temp_c" in parser.chart_metrics
+    assert "ambient_temp_c" not in parser.chart_metrics
+    assert "humidity_pct" not in parser.chart_metrics
+    assert 'group: "wearable"' in script
+    assert "latest.wearable || {}" in script
+    assert "wearable.wrist_surface_temp_c" in script
+    assert 'schema !== "health.telemetry.v3"' in script
     assert "skin_temp_c" not in script
 
 
@@ -79,7 +81,7 @@ def test_dashboard_keeps_responsive_and_accessible_basics():
 
     assert 'class="skip-link"' in html
     assert 'aria-live="polite"' in html
-    assert "repeat(4, minmax(0, 1fr))" in styles
+    assert "repeat(3, minmax(0, 1fr))" in styles
     assert "repeat(2, minmax(0, 1fr))" in styles
     assert "prefers-reduced-motion" in styles
 
@@ -164,6 +166,8 @@ setTimeout(() => {{
     connection: nodes.get("#connection-text").textContent,
     heartRate: nodes.get("#heart-rate").textContent,
     heartQuality: nodes.get("#heart-quality").textContent,
+    wristTemp: nodes.get("#wrist-temp").textContent,
+    wristTempQuality: nodes.get("#wrist-temp-quality").textContent,
     cacheNoticeHidden: nodes.get("#latest-data-state").hidden,
     chartVisible: nodes.get("#chart").classList.contains("visible"),
     chartEmptyHidden: nodes.get("#chart-empty").hidden,
@@ -191,6 +195,8 @@ setTimeout(() => {{
 def assert_dashboard_context_is_cleared(state: dict[str, object]) -> None:
     assert state["heartRate"] == "—"
     assert state["heartQuality"] == "Chưa có dữ liệu"
+    assert state["wristTemp"] == "—"
+    assert state["wristTempQuality"] == "Chưa có dữ liệu"
     assert state["cacheNoticeHidden"] is True
     assert state["chartVisible"] is False
     assert state["chartEmptyHidden"] is False
@@ -234,11 +240,12 @@ async (url) => {
     return { ok: true, json: async () => ({
       device: { online: true, last_seen_at: "2026-08-12T15:00:00Z" },
       latest: {
+        schema: "health.telemetry.v3",
         vitals: { heart_rate_bpm: null, spo2_pct: null },
-        environment: { ambient_temp_c: 28.5, humidity_pct: 47.0 },
+        wearable: { wrist_surface_temp_c: 33.2 },
         quality: {
           heart_rate_valid: false, spo2_valid: false, finger_present: false,
-          ambient_temp_valid: true, humidity_valid: true, ppg: 0,
+          wrist_surface_temp_valid: true, ppg: 0,
           motion_artifact: false, motion_valid: false
         },
         motion: { fall_state: "unknown" },
@@ -262,3 +269,38 @@ async (url) => {
         "Edge đã gửi dữ liệu nhưng giao diện không thể hiển thị. "
         "Hãy tải lại trang."
     )
+
+
+def test_dashboard_never_relabels_legacy_temperature_as_wrist_surface():
+    fetch_implementation = r"""
+async (url) => {
+  if (url.includes("/devices")) {
+    return { ok: true, json: async () => ({ data: [{ device_id: "legacy-node", online: true }] }) };
+  }
+  if (url.includes("/overview")) {
+    return { ok: true, json: async () => ({
+      device: { online: true, last_seen_at: "2026-08-13T15:00:00Z" },
+      latest: {
+        schema: "health.telemetry.v2",
+        vitals: { heart_rate_bpm: 72, spo2_pct: 98 },
+        wearable: { wrist_surface_temp_c: 34.7 },
+        environment: { ambient_temp_c: 28.5, humidity_pct: 47 },
+        quality: {
+          heart_rate_valid: true, spo2_valid: true, finger_present: true,
+          wrist_surface_temp_valid: true, ppg: 0.9,
+          motion_artifact: false, motion_valid: true
+        },
+        motion: { fall_state: "idle" },
+        system: { rssi_dbm: -30, fw: "legacy" }
+      },
+      history: [], alerts: []
+    }) };
+  }
+  return { ok: true, json: async () => ({ data: [] }) };
+}
+"""
+
+    state = run_dashboard_failure_harness(fetch_implementation)
+
+    assert state["wristTemp"] == "—"
+    assert state["wristTempQuality"] == "Không có trong telemetry v1/v2"

@@ -158,7 +158,7 @@ bool MqttTransport::publishTelemetry(const TelemetrySnapshot& snapshot, uint32_t
   }
 
   document_.clear();
-  document_["schema"] = "health.telemetry.v2";
+  document_["schema"] = "health.telemetry.v3";
   document_["device_id"] = deviceId_;
   document_["boot_id"] = bootId_;
   document_["seq"] = allocateSequence();
@@ -168,9 +168,8 @@ bool MqttTransport::publishTelemetry(const TelemetrySnapshot& snapshot, uint32_t
   setNullable(vitals, "heart_rate_bpm", snapshot.heartRateBpm);
   setNullable(vitals, "spo2_pct", snapshot.spo2Pct);
 
-  JsonObject environment = document_["environment"].to<JsonObject>();
-  setNullable(environment, "ambient_temp_c", snapshot.ambientTempC);
-  setNullable(environment, "humidity_pct", snapshot.humidityPct);
+  JsonObject wearable = document_["wearable"].to<JsonObject>();
+  setNullable(wearable, "wrist_surface_temp_c", snapshot.wristSurfaceTempC);
 
   JsonObject motion = document_["motion"].to<JsonObject>();
   if (snapshot.motionValid && isfinite(snapshot.accelMagnitudeG) &&
@@ -189,8 +188,7 @@ bool MqttTransport::publishTelemetry(const TelemetrySnapshot& snapshot, uint32_t
   quality["motion_artifact"] = snapshot.motionArtifact;
   quality["heart_rate_valid"] = snapshot.heartRateBpm.valid;
   quality["spo2_valid"] = snapshot.spo2Pct.valid;
-  quality["ambient_temp_valid"] = snapshot.ambientTempC.valid;
-  quality["humidity_valid"] = snapshot.humidityPct.valid;
+  quality["wrist_surface_temp_valid"] = snapshot.wristSurfaceTempC.valid;
   quality["motion_valid"] = snapshot.motionValid;
 
   JsonObject system = document_["system"].to<JsonObject>();
@@ -314,8 +312,8 @@ void MqttTransport::addFaults(JsonArray target, uint8_t faultMask) {
   if ((faultMask & kFaultMpu6050) != 0U) {
     target.add("mpu6050_unavailable");
   }
-  if ((faultMask & kFaultDht11) != 0U) {
-    target.add("dht11_unavailable");
+  if ((faultMask & kFaultDs18b20) != 0U) {
+    target.add("ds18b20_unavailable");
   }
   if ((faultMask & kFaultPpgOverflow) != 0U) {
     target.add("ppg_sample_loss");

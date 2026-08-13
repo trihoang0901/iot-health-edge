@@ -55,17 +55,22 @@ Không tạo tệp password rỗng thủ công. Nếu chủ động tạo lại 
   thay đổi chương trình đang chạy trên NodeMCU.
 - Xác nhận Mosquitto đang map cổng 1883, Windows Firewall cho phép subnet
   Private, client hotspot không bị cô lập và tài khoản `health_node` đúng ACL.
-- Kết nối chỉ được xem là phục hồi khi broker thấy client node, API nhận bản
-  tin `health.telemetry.v2` mới với firmware `0.2.2` và báo `online=true`.
-  Serial `mqtt_connected` là checkpoint phần cứng bổ sung cần ghi lại.
+- Last-known physical firmware `0.2.2` phát v2. Source `0.3.0` chưa được upload,
+  vì vậy không xem việc node còn báo `0.2.2` là lỗi migration. Sau một lần upload
+  `0.3.0` được chủ động cho phép trong tương lai, kết nối chỉ được xem là phục
+  hồi khi broker thấy client, API nhận `health.telemetry.v3` mới với
+  `system.fw="0.3.0"`, `seq` tăng và báo `online=true`; Serial
+  `mqtt_connected` là checkpoint bổ sung.
 
 ### Payload bị từ chối
 
 - `device_id` trong topic và payload phải khớp.
 - Số đo có cờ invalid phải là `null`, không phải `0`, `NaN` hoặc chuỗi.
-- Telemetry mới phải dùng `health.telemetry.v2`, đặt giá trị DHT11 trong
-  `environment` và dùng `ambient_temp_valid`/`humidity_valid`; không đặt chúng
-  vào field `skin_temp_*` cũ.
+- Telemetry source mới phải dùng `health.telemetry.v3`, đặt đúng
+  `wearable.wrist_surface_temp_c` và
+  `quality.wrist_surface_temp_valid`; không đặt nhiệt độ cổ tay vào
+  `skin_temp_*` v1 hoặc `environment` v2. Edge vẫn nhận strict v1/v2 cho node và
+  lịch sử cũ, nhưng không ánh xạ chúng thành nhiệt độ cổ tay.
 - `fall_state` phải thuộc enum trong [data contract](data-contract.md).
 - Không thêm field tùy ý; schema edge cấm field lạ.
 
@@ -122,30 +127,36 @@ best-effort đã chấp nhận, không dùng kênh này cho tình huống cấp 
   hòa sau startup overflow là lỗi. Một số module cần tiêu thụ một mẫu hoàn chỉnh
   trước khi counter trở lại bình thường, nên clear-and-return trước khi đọc có
   thể tự khóa đường FIFO.
-- Dùng firmware `0.2.2`: pre-read `OVF_COUNTER` không còn là gate. Firmware vẫn
-  fail-closed khi khoảng gọi MAX30102 vượt `250 ms` hoặc SparkFun `check()` fetch
-  từ bốn mẫu vào buffer cục bộ; khi đó cửa sổ PPG cũ bị hủy có chủ đích.
+- Sửa lỗi đã được kiểm tra trên `0.2.2` và được giữ trong source `0.3.0`:
+  pre-read `OVF_COUNTER` không còn là gate. Firmware vẫn fail-closed khi khoảng
+  gọi MAX30102 vượt `250 ms` hoặc SparkFun `check()` fetch từ bốn mẫu vào buffer
+  cục bộ; khi đó cửa sổ PPG cũ bị hủy có chủ đích. Điều này không phải bằng
+  chứng rằng `0.3.0` đã được upload.
 - Diagnostic đã thấy khoảng 25 mẫu/s, gap tối đa 10–37 ms và không có local
-  storage hit. IR không-ngón-tay khoảng 812–853; probe với ngón tay trước đó đạt
-  khoảng 219.000–225.000. Điều này xác nhận đường quang thô, chưa xác nhận HR
-  hoặc SpO₂ cuối.
+  storage hit. IR không-ngón-tay khoảng 812–853; probe với ngón tay đạt khoảng
+  219.000–225.000. Trên production `0.2.2`, 20 mẫu liên tiếp sau đó có
+  `finger_present=true`, PPG 0,66–0,81 và HR/SpO₂ hợp lệ. Đây là bring-up
+  pipeline, không xác nhận độ chính xác y tế.
 - Đặt ngón tay phủ đúng LED/photodiode, giữ lực ổn định và che ánh sáng ngoài.
   Chỉ kết luận đạt khi telemetry mới có HR/SpO₂ cùng cờ hợp lệ phù hợp; không
   diễn giải raw IR thành số đo sức khỏe.
 
 ### MPU-6050/MPU-6500-compatible không hoạt động
 
-- Firmware `0.2.2` thăm dò địa chỉ I2C `0x68`; giữ AD0 ở mức thấp. Nếu scanner
+- Logic đã được kiểm tra trên `0.2.2` và giữ trong source `0.3.0` thăm dò địa
+  chỉ I2C `0x68`; giữ AD0 ở mức thấp. Nếu scanner
   chỉ thấy `0x69`, sửa mức AD0/dây nối thay vì đổi kết luận từ tên sản phẩm.
 - Sau khi ACK tại `0x68`, đọc thanh ghi `WHO_AM_I` ở `0x75`. Chỉ `0x68`
   (MPU-6050) hoặc `0x70` (MPU-6500-compatible) được hỗ trợ. Địa chỉ `0x68` và
   giá trị nhận dạng `0x68` là hai phép kiểm tra khác nhau.
 - Tiếp tục đọc đủ 14 byte từ `0x3B` đến `0x48`. NACK, ID khác hoặc frame thiếu
   nghĩa là chưa đạt, dù I2C scanner đã thấy địa chỉ.
-- Nạp firmware `0.2.2` rồi yêu cầu telemetry mới cùng boot có `seq` tăng,
-  `quality.motion_valid=true`, `motion.accel_g`/`motion.gyro_dps` hữu hạn và
-  không có `mpu6050_unavailable`. Gia tốc đứng yên nên hợp lý quanh 1 g sau khi
-  đặt module ổn định; đây chỉ là kiểm tra bring-up, không phải hiệu chuẩn.
+- Khi kiểm thử source `0.3.0` trong một phiên upload được cho phép sau này, yêu
+  cầu telemetry v3 mới cùng boot có `seq` tăng, `quality.motion_valid=true`,
+  `motion.accel_g`/`motion.gyro_dps` hữu hạn và không có
+  `mpu6050_unavailable`. Gia tốc đứng yên nên hợp lý quanh 1 g sau khi đặt
+  module ổn định; đây chỉ là bring-up, không phải hiệu chuẩn. Bằng chứng tương
+  đương đã có trên `0.2.2`, không tự chuyển thành bằng chứng cho `0.3.0`.
 - Mã `mpu6050_unavailable` được cố ý giữ cho cả hai biến thể nhằm tương thích
   edge/dashboard; nó không chứng minh module là MPU-6050.
 - Kiểm tra cùng bus I2C với MAX30102 và nguồn 3,3 V logic. Nếu từng cảm biến
@@ -153,23 +164,28 @@ best-effort đã chấp nhận, không dùng kênh này cho tình huống cấp 
 - Không mô phỏng ngã bằng cách để người ngã. Chỉ dùng chuyển động cầm tay hoặc
   thả module lên vật liệu đệm trong bài thử phi lâm sàng có kiểm soát.
 
-### DHT11 trả `null` hoặc `dht11_unavailable`
+### DS18B20 trả `null` hoặc `ds18b20_unavailable`
 
-- Kiểm tra pinout của đúng cảm biến/module, DATA D5/GPIO14 và GND chung. Không
-  suy đoán thứ tự chân theo hình bán hàng.
-- DHT11 rời bốn chân cần pull-up 4,7–10 kΩ từ DATA lên **3V3**; module ba chân
-  thường đã có điện trở nhưng phải xác minh trên module cụ thể.
-- Không đọc nhanh hơn một lần mỗi hai giây. Firmware vẫn phải phát telemetry
-  với giá trị `null`, cờ hợp lệ `false` và fault kỹ thuật khi đọc lỗi.
-- Kiểm tra nguồn 3,3 V, dây ngắn và tránh để dây DATA gần tải gây nhiễu. Không
-  đưa 5 V vào GPIO ESP8266.
-- Số đo DHT11 chỉ mô tả môi trường, không phải nhiệt độ cơ thể. Edge cố ý không
-  tạo cảnh báo sức khỏe từ nhiệt độ hoặc độ ẩm này.
+- Kiểm tra đúng pinout đầu dò, không suy đoán theo màu dây. Cấu hình được hỗ trợ
+  là powered three-wire: VDD=3V3, GND chung, DATA=D5/GPIO14; không dùng
+  parasite-power.
+- Bắt buộc có điện trở 4,7 kΩ từ DATA lên **3V3**. Không kéo GPIO ESP8266 lên
+  5 V; giữ dây gọn và tránh tải gây nhiễu.
+- Source `0.3.0` đặt độ phân giải 12-bit, gọi chuyển đổi bất đồng bộ và chỉ đọc
+  sau ít nhất `750 ms`. Nếu code chờ `delay(750)` hoặc polling bận, MAX30102,
+  motion/MQTT có thể mất nhịp; đó là lỗi triển khai, không phải cách khắc phục.
+- Lỗi phải vẫn phát v3 với `wearable.wrist_surface_temp_c=null`,
+  `quality.wrist_surface_temp_valid=false` và fault `ds18b20_unavailable`.
+- Giá trị hợp lệ chỉ là nhiệt độ bề mặt tại điểm tiếp xúc, không phải nhiệt độ
+  cơ thể/lõi, không kết luận sốt và không tạo alert sức khỏe/Telegram.
+- Source `0.3.0` chưa được upload và chưa có số đọc DS18B20 vật lý được xác
+  nhận. Dùng checklist phần cứng ở trạng thái chưa hoàn thành cho tới khi có
+  telemetry mới sau một phiên upload riêng được cho phép.
 
 ### ESP8266 reset/ngắt MQTT
 
 - Dùng cáp data và nguồn USB ổn định; không cấp servo/quạt/relay từ 3V3.
-- Không đọc DHT11 nhanh hơn hai giây hoặc giữ vòng MAX30102 quá lâu mà bỏ
+- Không chờ đồng bộ 750 ms cho DS18B20 hoặc giữ vòng MAX30102 quá lâu mà bỏ
   `yield()`/`mqtt.loop()`.
 - Giữ JSON gọn; PubSubClient cần buffer phù hợp.
 - Theo dõi `free_heap` và reset reason trên Serial.

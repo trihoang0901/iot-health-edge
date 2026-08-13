@@ -14,7 +14,14 @@ $env:SIMULATOR_MQTT_PASSWORD = '<mat-khau-node-da-tao>'
 python -m simulator --scenario normal --count 20
 ```
 
-Các kịch bản: `normal`, `dht_fault`, `motion_artifact`, `low_spo2`, `high_hr`, `fall`, `offline`. Kịch bản `dht_fault` vẫn phát `health.telemetry.v2`, nhưng đặt nhiệt độ môi trường và độ ẩm thành `null`, hai cờ hợp lệ thành `false`, đồng thời thêm lỗi kỹ thuật `dht11_unavailable`. Dùng `--count 0` để chạy liên tục. Có thể dùng `--prompt-password` thay biến mật khẩu để nhập ẩn. CLI cố ý không nhận mật khẩu dạng tham số để tránh shell lưu plaintext trong lịch sử.
+Các kịch bản: `normal`, `ds18b20_fault`, `motion_artifact`, `low_spo2`,
+`high_hr`, `fall`, `offline`. Simulator mặc định phát strict
+`health.telemetry.v3`. Kịch bản `ds18b20_fault` đặt
+`wearable.wrist_surface_temp_c` thành `null`, cờ
+`quality.wrist_surface_temp_valid=false` và thêm fault kỹ thuật
+`ds18b20_unavailable`. Dùng `--count 0` để chạy liên tục. Có thể dùng
+`--prompt-password` thay biến mật khẩu để nhập ẩn. CLI cố ý không nhận mật khẩu
+dạng tham số để tránh shell lưu plaintext trong lịch sử.
 
 Simulator phát đúng ba topic:
 
@@ -24,4 +31,7 @@ iot-health/v1/devices/{device_id}/event
 iot-health/v1/devices/{device_id}/status
 ```
 
-Status được retain; telemetry dùng QoS 0 giống giới hạn của PubSubClient trên firmware; event/status dùng QoS 1 trong simulator. Telemetry v2 mô phỏng DHT11 bằng `environment.ambient_temp_c` và `environment.humidity_pct`; đây là số đo môi trường tổng hợp, không phải nhiệt độ cơ thể hay dữ liệu bệnh nhân.
+Status được retain; telemetry dùng QoS 0 giống giới hạn của PubSubClient trên
+firmware; event/status dùng QoS 1 trong simulator. Nhiệt độ v3 là số đo tiếp xúc
+bề mặt cổ tay thử nghiệm từ DS18B20, không phải nhiệt độ cơ thể/lõi, không dùng
+để chẩn đoán sốt và không kích hoạt alert nhiệt độ.

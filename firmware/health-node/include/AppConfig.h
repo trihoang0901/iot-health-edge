@@ -16,11 +16,11 @@
 
 namespace config {
 
-constexpr char kFirmwareVersion[] = "0.2.2";
+constexpr char kFirmwareVersion[] = "0.3.0";
 
 constexpr uint8_t kI2cSdaPin = D2;       // GPIO4
 constexpr uint8_t kI2cSclPin = D1;       // GPIO5
-constexpr uint8_t kDht11Pin = D5;        // GPIO14
+constexpr uint8_t kDs18b20Pin = D5;      // GPIO14, powered 3-wire mode
 constexpr uint8_t kBuzzerPin = D6;       // GPIO12, optional through 1 kOhm + 2N2222
 constexpr uint8_t kAckButtonPin = D7;    // GPIO13, optional button to GND
 
@@ -34,7 +34,8 @@ constexpr uint32_t kI2cClockStretchLimitUs = 50;
 constexpr uint32_t kImuPeriodMs = 20;          // 50 Hz
 constexpr uint32_t kTelemetryPeriodMs = 1000;
 constexpr uint32_t kStatusPeriodMs = 30000;
-constexpr uint32_t kEnvironmentPeriodMs = 2000;  // DHT11 minimum sampling interval
+constexpr uint32_t kTemperaturePeriodMs = 2000;
+constexpr uint32_t kTemperatureConversionMs = 750;  // DS18B20, 12-bit
 constexpr uint32_t kSensorRetryMs = 10000;
 constexpr uint32_t kPpgWindowRefreshMs = 1000;
 constexpr uint32_t kPpgStaleMs = 5000;

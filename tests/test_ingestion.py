@@ -90,6 +90,34 @@ def test_v2_invalid_environment_flag_pair_is_rejected(
     assert "must be null" in result.error
 
 
+def test_v3_telemetry_is_ingested_with_wearable_normalization(
+    tmp_path, valid_telemetry_v3_payload
+):
+    database, service = make_service(tmp_path)
+
+    result = service.process_message(message("telemetry", valid_telemetry_v3_payload))
+
+    assert result.accepted and not result.duplicate
+    latest = database.latest_telemetry("health-node-01")
+    assert latest["schema"] == "health.telemetry.v3"
+    assert latest["wearable"] == {"wrist_surface_temp_c": 32.8}
+    assert latest["quality"]["wrist_surface_temp_valid"] is True
+    assert latest["environment"] == {"ambient_temp_c": None, "humidity_pct": None}
+    assert latest["vitals"]["skin_temp_c"] is None
+
+
+def test_v3_invalid_wrist_surface_flag_pair_is_rejected(
+    tmp_path, valid_telemetry_v3_payload
+):
+    _, service = make_service(tmp_path)
+    valid_telemetry_v3_payload["quality"]["wrist_surface_temp_valid"] = False
+
+    result = service.process_message(message("telemetry", valid_telemetry_v3_payload))
+
+    assert not result.accepted
+    assert "must be null" in result.error
+
+
 def test_duplicate_telemetry_does_not_rewind_device_liveness(tmp_path, clone_payload):
     database, service = make_service(tmp_path)
     start = datetime(2026, 8, 4, 12, 0, tzinfo=UTC)

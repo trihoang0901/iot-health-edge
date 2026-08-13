@@ -1,9 +1,11 @@
 #pragma once
 
-#include <DHT.h>
+#include <DallasTemperature.h>
 #include <MAX30105.h>
+#include <OneWire.h>
 
 #include "AppConfig.h"
+#include "Ds18b20Schedule.h"
 #include "Model.h"
 #include "Mpu6Axis.h"
 
@@ -28,7 +30,10 @@ class SensorHub {
 
   bool initializeMax30102(uint32_t nowMs);
   bool initializeImu(uint32_t nowMs);
-  void initializeDht11(uint32_t nowMs);
+  bool initializeDs18b20(uint32_t nowMs);
+  bool discoverDs18b20Address();
+  bool requestDs18b20Conversion(uint32_t nowMs);
+  void invalidateDs18b20(uint32_t nowMs);
 
   void tickMax30102(uint32_t nowMs);
   void addPpgSample(uint32_t red, uint32_t ir, uint32_t nowMs);
@@ -38,14 +43,17 @@ class SensorHub {
 
   void tickImu(uint32_t nowMs);
   void invalidateImu(uint32_t nowMs);
-  void tickDht11(uint32_t nowMs);
+  void tickDs18b20(uint32_t nowMs);
 
   MAX30105 max30102_;
   Mpu6Axis mpu6Axis_;
-  DHT dht11_;
+  OneWire oneWire_;
+  DallasTemperature ds18b20_;
+  DeviceAddress ds18b20Address_ = {};
 
   bool maxReady_ = false;
   bool mpuReady_ = false;
+  bool dsReady_ = false;
   uint32_t maxRetryMs_ = 0;
   uint32_t mpuRetryMs_ = 0;
 
@@ -66,7 +74,7 @@ class SensorHub {
   FallSample pendingMotionSample_;
   bool motionSamplePending_ = false;
 
-  uint32_t lastEnvironmentReadMs_ = 0;
+  Ds18b20Schedule ds18b20Schedule_;
 
   TelemetrySnapshot snapshot_;
 };

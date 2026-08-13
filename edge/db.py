@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Iterator
 
-from .schemas import DeviceStatus, Telemetry, TelemetryMessage
+from .schemas import DeviceStatus, Telemetry, TelemetryMessage, TelemetryV2, TelemetryV3
 
 
 ACTIVE_STATES = ("open", "acknowledged")
@@ -90,6 +90,7 @@ class Database:
                     skin_temp_c REAL,
                     ambient_temp_c REAL,
                     humidity_pct REAL,
+                    wrist_surface_temp_c REAL,
                     accel_g REAL,
                     gyro_dps REAL,
                     fall_state TEXT NOT NULL,
@@ -101,6 +102,7 @@ class Database:
                     skin_temp_valid INTEGER NOT NULL,
                     ambient_temp_valid INTEGER NOT NULL DEFAULT 0,
                     humidity_valid INTEGER NOT NULL DEFAULT 0,
+                    wrist_surface_temp_valid INTEGER NOT NULL DEFAULT 0,
                     motion_valid INTEGER NOT NULL,
                     rssi_dbm INTEGER,
                     free_heap INTEGER,
@@ -153,13 +155,13 @@ class Database:
                 );
                 """
             )
-            self._migrate_telemetry_v2_columns(connection)
+            self._migrate_telemetry_columns(connection)
             self._migrate_legacy_alert_history(connection)
             self._resolve_retired_surface_alerts(connection)
             connection.commit()
 
     @staticmethod
-    def _migrate_telemetry_v2_columns(connection: sqlite3.Connection) -> None:
+    def _migrate_telemetry_columns(connection: sqlite3.Connection) -> None:
         columns = {
             row["name"]
             for row in connection.execute("PRAGMA table_info(telemetry)").fetchall()
@@ -173,6 +175,8 @@ class Database:
             ("humidity_pct", "REAL"),
             ("ambient_temp_valid", "INTEGER NOT NULL DEFAULT 0"),
             ("humidity_valid", "INTEGER NOT NULL DEFAULT 0"),
+            ("wrist_surface_temp_c", "REAL"),
+            ("wrist_surface_temp_valid", "INTEGER NOT NULL DEFAULT 0"),
         )
         for name, declaration in additions:
             if name not in columns:
@@ -311,13 +315,28 @@ class Database:
             humidity_pct = None
             ambient_temp_valid = False
             humidity_valid = False
-        else:
+            wrist_surface_temp_c = None
+            wrist_surface_temp_valid = False
+        elif isinstance(telemetry, TelemetryV2):
             skin_temp_c = None
             skin_temp_valid = False
             ambient_temp_c = telemetry.environment.ambient_temp_c
             humidity_pct = telemetry.environment.humidity_pct
             ambient_temp_valid = telemetry.quality.ambient_temp_valid
             humidity_valid = telemetry.quality.humidity_valid
+            wrist_surface_temp_c = None
+            wrist_surface_temp_valid = False
+        elif isinstance(telemetry, TelemetryV3):
+            skin_temp_c = None
+            skin_temp_valid = False
+            ambient_temp_c = None
+            humidity_pct = None
+            ambient_temp_valid = False
+            humidity_valid = False
+            wrist_surface_temp_c = telemetry.wearable.wrist_surface_temp_c
+            wrist_surface_temp_valid = telemetry.quality.wrist_surface_temp_valid
+        else:
+            raise TypeError("unsupported telemetry model")
         with self._write_lock, self.connection() as connection:
             duplicate = connection.execute(
                 """
@@ -335,13 +354,15 @@ class Database:
                 INSERT INTO telemetry (
                     device_id, boot_id, seq, uptime_ms, received_at, schema_version,
                     heart_rate_bpm, spo2_pct, skin_temp_c, ambient_temp_c, humidity_pct,
+                    wrist_surface_temp_c,
                     accel_g, gyro_dps, fall_state,
                     ppg, finger_present, motion_artifact,
                     heart_rate_valid, spo2_valid, skin_temp_valid,
-                    ambient_temp_valid, humidity_valid, motion_valid,
+                    ambient_temp_valid, humidity_valid, wrist_surface_temp_valid,
+                    motion_valid,
                     rssi_dbm, free_heap, fw, faults_json, raw_json
                 ) VALUES (
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                 )
                 """,
                 (
@@ -356,6 +377,7 @@ class Database:
                     skin_temp_c,
                     ambient_temp_c,
                     humidity_pct,
+                    wrist_surface_temp_c,
                     telemetry.motion.accel_g,
                     telemetry.motion.gyro_dps,
                     telemetry.motion.fall_state,
@@ -367,6 +389,7 @@ class Database:
                     int(skin_temp_valid),
                     int(ambient_temp_valid),
                     int(humidity_valid),
+                    int(wrist_surface_temp_valid),
                     int(telemetry.quality.motion_valid),
                     telemetry.system.rssi_dbm,
                     telemetry.system.free_heap,
@@ -779,6 +802,9 @@ class Database:
                 "ambient_temp_c": data["ambient_temp_c"],
                 "humidity_pct": data["humidity_pct"],
             },
+            "wearable": {
+                "wrist_surface_temp_c": data["wrist_surface_temp_c"],
+            },
             "motion": {
                 "accel_g": data["accel_g"],
                 "gyro_dps": data["gyro_dps"],
@@ -793,6 +819,9 @@ class Database:
                 "skin_temp_valid": bool(data["skin_temp_valid"]),
                 "ambient_temp_valid": bool(data["ambient_temp_valid"]),
                 "humidity_valid": bool(data["humidity_valid"]),
+                "wrist_surface_temp_valid": bool(
+                    data["wrist_surface_temp_valid"]
+                ),
                 "motion_valid": bool(data["motion_valid"]),
             },
             "system": {

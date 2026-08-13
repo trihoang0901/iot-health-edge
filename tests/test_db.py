@@ -4,7 +4,7 @@ import json
 from datetime import UTC, datetime, timedelta
 
 from edge.db import Database
-from edge.schemas import Telemetry, TelemetryV2
+from edge.schemas import Telemetry, TelemetryV2, TelemetryV3
 
 
 def test_telemetry_retention_keeps_newest_rows_per_device(tmp_path, clone_payload):
@@ -31,8 +31,11 @@ def test_telemetry_retention_keeps_newest_rows_per_device(tmp_path, clone_payloa
     assert [row["seq"] for row in database.telemetry_history("device-b")] == [0, 1]
 
 
-def test_v1_and_v2_rows_share_database_with_normalized_additive_responses(
-    tmp_path, valid_telemetry_payload, valid_telemetry_v2_payload
+def test_v1_v2_and_v3_rows_share_database_with_normalized_additive_responses(
+    tmp_path,
+    valid_telemetry_payload,
+    valid_telemetry_v2_payload,
+    valid_telemetry_v3_payload,
 ):
     database = Database(tmp_path / "mixed.db")
     database.initialize()
@@ -48,22 +51,39 @@ def test_v1_and_v2_rows_share_database_with_normalized_additive_responses(
         received + timedelta(seconds=1),
         json.dumps(valid_telemetry_v2_payload),
     )
+    database.insert_telemetry(
+        TelemetryV3.model_validate(valid_telemetry_v3_payload),
+        received + timedelta(seconds=2),
+        json.dumps(valid_telemetry_v3_payload),
+    )
 
-    v1, v2 = database.telemetry_history("health-node-01")
+    v1, v2, v3 = database.telemetry_history("health-node-01")
     assert v1["schema"] == v1["schema_version"] == "health.telemetry.v1"
     assert v1["vitals"]["skin_temp_c"] == 34.5
     assert v1["environment"] == {"ambient_temp_c": None, "humidity_pct": None}
+    assert v1["wearable"] == {"wrist_surface_temp_c": None}
     assert v1["quality"]["ambient_temp_valid"] is False
     assert v1["quality"]["humidity_valid"] is False
+    assert v1["quality"]["wrist_surface_temp_valid"] is False
     assert v2["schema"] == v2["schema_version"] == "health.telemetry.v2"
     assert v2["vitals"]["skin_temp_c"] is None
     assert v2["quality"]["skin_temp_valid"] is False
     assert v2["environment"] == {"ambient_temp_c": 28.5, "humidity_pct": 63.0}
+    assert v2["wearable"] == {"wrist_surface_temp_c": None}
     assert v2["quality"]["ambient_temp_valid"] is True
     assert v2["quality"]["humidity_valid"] is True
+    assert v2["quality"]["wrist_surface_temp_valid"] is False
+    assert v3["schema"] == v3["schema_version"] == "health.telemetry.v3"
+    assert v3["vitals"]["skin_temp_c"] is None
+    assert v3["quality"]["skin_temp_valid"] is False
+    assert v3["environment"] == {"ambient_temp_c": None, "humidity_pct": None}
+    assert v3["quality"]["ambient_temp_valid"] is False
+    assert v3["quality"]["humidity_valid"] is False
+    assert v3["wearable"] == {"wrist_surface_temp_c": 32.8}
+    assert v3["quality"]["wrist_surface_temp_valid"] is True
 
 
-def test_initialize_adds_v2_columns_to_legacy_telemetry_without_data_loss(
+def test_initialize_adds_current_columns_to_legacy_telemetry_without_data_loss(
     tmp_path, valid_telemetry_payload
 ):
     database = Database(tmp_path / "legacy-telemetry.db")
@@ -136,12 +156,21 @@ def test_initialize_adds_v2_columns_to_legacy_telemetry_without_data_loss(
         "humidity_pct",
         "ambient_temp_valid",
         "humidity_valid",
+        "wrist_surface_temp_c",
+        "wrist_surface_temp_valid",
     } <= columns
     assert row_count == 1
+    with database.connection() as connection:
+        migrated_raw_json = connection.execute(
+            "SELECT raw_json FROM telemetry"
+        ).fetchone()[0]
+    assert migrated_raw_json == legacy_row["raw_json"]
     migrated = database.latest_telemetry("health-node-01")
     assert migrated["schema"] == "health.telemetry.v1"
     assert migrated["vitals"]["skin_temp_c"] == 34.5
     assert migrated["environment"] == {"ambient_temp_c": None, "humidity_pct": None}
+    assert migrated["wearable"] == {"wrist_surface_temp_c": None}
+    assert migrated["quality"]["wrist_surface_temp_valid"] is False
 
 
 def test_initialize_resolves_active_alert_for_retired_surface_rule(tmp_path):

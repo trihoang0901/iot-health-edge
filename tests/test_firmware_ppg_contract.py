@@ -25,7 +25,7 @@ def test_production_firmware_has_no_ppg_diagnostic_build_path():
     assert "nodemcuv2_ppg_diag" not in platformio
 
 
-def test_ppg_recovery_fix_bumps_firmware_version():
+def test_ppg_recovery_remains_in_current_firmware_release():
     config = APP_CONFIG.read_text(encoding="utf-8")
 
-    assert 'constexpr char kFirmwareVersion[] = "0.2.2";' in config
+    assert 'constexpr char kFirmwareVersion[] = "0.3.0";' in config

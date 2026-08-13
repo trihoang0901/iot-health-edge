@@ -11,16 +11,16 @@
 | Trạng thái | `iot-health/v1/devices/{device_id}/status` |
 
 `v1` trong đường dẫn là phiên bản namespace topic và vẫn được giữ khi
-telemetry nâng lên v2. `device_id` trong payload phải khớp segment thiết bị
+telemetry nâng lên v2/v3. `device_id` trong payload phải khớp segment thiết bị
 trong topic. JSON không được chứa `NaN`/`Infinity` hoặc field ngoài schema.
 
-## Telemetry hiện hành `health.telemetry.v2`
+## Telemetry hiện hành `health.telemetry.v3`
 
-Firmware `0.2.2` và simulator hiện hành phát cấu trúc sau:
+Source firmware `0.3.0` và simulator hiện hành phát cấu trúc sau:
 
 ```json
 {
-  "schema": "health.telemetry.v2",
+  "schema": "health.telemetry.v3",
   "device_id": "health-node-01",
   "boot_id": "73f77b235fc24b29a6f8268b396ca69e",
   "seq": 42,
@@ -29,9 +29,8 @@ Firmware `0.2.2` và simulator hiện hành phát cấu trúc sau:
     "heart_rate_bpm": 72.4,
     "spo2_pct": 98.1
   },
-  "environment": {
-    "ambient_temp_c": 28.5,
-    "humidity_pct": 63.0
+  "wearable": {
+    "wrist_surface_temp_c": 33.2
   },
   "motion": {
     "accel_g": 1.012,
@@ -44,14 +43,13 @@ Firmware `0.2.2` và simulator hiện hành phát cấu trúc sau:
     "motion_artifact": false,
     "heart_rate_valid": true,
     "spo2_valid": true,
-    "motion_valid": true,
-    "ambient_temp_valid": true,
-    "humidity_valid": true
+    "wrist_surface_temp_valid": true,
+    "motion_valid": true
   },
   "system": {
     "rssi_dbm": -55,
     "free_heap": 36120,
-    "fw": "0.2.2",
+    "fw": "0.3.0",
     "faults": []
   }
 }
@@ -68,46 +66,57 @@ Quy tắc chung:
   `acked`, `refractory` hoặc `unknown`.
 - `quality.ppg` là điểm chất lượng chuẩn hóa `0..1`, có thể `null`; đây không
   phải độ tin cậy lâm sàng.
-- Nhiệt độ môi trường hợp lệ nằm trong `0..50 °C`; độ ẩm tương đối hợp lệ nằm
-  trong `0..100%`. Đây là ràng buộc dữ liệu của prototype, không phải chứng
-  nhận hiệu chuẩn.
+- `wearable.wrist_surface_temp_c` hợp lệ nằm trong `0..50 °C`. Đây là ràng
+  buộc dữ liệu của prototype, không phải dải chẩn đoán hay chứng nhận hiệu chuẩn.
 - Mỗi giá trị có cờ `*_valid` riêng. Nếu cờ là `false`, giá trị tương ứng bắt
   buộc là `null`; nếu cờ là `true`, giá trị không được `null`.
-- Khi DHT11 đọc lỗi, telemetry vẫn được gửi với hai giá trị môi trường `null`,
-  cờ tương ứng `false` và `system.faults` chứa `dht11_unavailable`.
-- DHT11 đo điều kiện môi trường, không phải nhiệt độ da/cơ thể/lõi. Edge không
-  tạo cảnh báo sức khỏe từ nhiệt độ hoặc độ ẩm DHT11.
+- Khi DS18B20 đọc lỗi hoặc vắng mặt, telemetry vẫn được gửi với
+  `wearable.wrist_surface_temp_c=null`,
+  `quality.wrist_surface_temp_valid=false` và `system.faults` chứa
+  `ds18b20_unavailable`.
+- DS18B20 chỉ đo bề mặt tại điểm tiếp xúc cổ tay. Edge không diễn giải nó thành
+  nhiệt độ cơ thể/lõi, không kết luận sốt và không tạo alert nhiệt độ.
 - Khi `motion_artifact=true`, HR và SpO₂ phải không hợp lệ. Nếu
   `motion_valid=false`, `accel_g`/`gyro_dps` là `null` và
   `fall_state="unknown"`.
-- Firmware `0.2.2` hỗ trợ MPU-6050 (`WHO_AM_I=0x68`) và module
+- Source firmware `0.3.0` tiếp tục hỗ trợ MPU-6050 (`WHO_AM_I=0x68`) và module
   MPU-6500-compatible (`WHO_AM_I=0x70`) tại cùng địa chỉ I2C `0x68`. Danh tính
   IMU không được thêm vào payload; cả hai biến thể dùng cùng field motion và
   tiếp tục báo mã tương thích ngược `mpu6050_unavailable` khi lỗi.
 - HR hoặc SpO₂ hợp lệ còn yêu cầu `quality.ppg` khác `null`, có ngón tay và
   `motion_valid=true`.
-- Firmware `0.2.2` không dùng pre-read `OVF_COUNTER` của MAX30102 làm gate.
+- Source firmware `0.3.0` giữ sửa lỗi đã được kiểm tra ở `0.2.2`: không dùng
+  pre-read `OVF_COUNTER` của MAX30102 làm gate.
   Cửa sổ PPG vẫn bị xóa, HR/SpO₂ thành `null` và cờ hợp lệ thành `false` nếu
   khoảng lấy mẫu vượt `250 ms` hoặc SparkFun `check()` fetch từ bốn mẫu vào
   buffer cục bộ. Thay đổi này không đổi schema hay quy tắc null/valid.
 - `faults` là danh sách mã kỹ thuật, không phải chẩn đoán. Ngoài
-  `dht11_unavailable`, firmware có thể báo `mpu6050_unavailable`,
+  `ds18b20_unavailable`, firmware có thể báo `mpu6050_unavailable`,
   `ppg_sample_loss` hoặc `event_queue_overflow`.
 
-## Tương thích telemetry v1 và dữ liệu lịch sử
+Firmware `0.3.0` yêu cầu chuyển đổi DS18B20 12-bit bất đồng bộ và đọc kết quả
+sau ít nhất `750 ms`; payload không nói rằng vòng lặp đã chờ. Source `0.3.0`
+chưa được upload và chưa có số đọc DS18B20 vật lý được xác nhận.
 
-Edge tiếp tục xác thực nghiêm ngặt `health.telemetry.v1`, gồm các field cũ
-`vitals.skin_temp_c` và `quality.skin_temp_valid`. Hỗ trợ này chỉ để đọc node
-cũ và lịch sử; firmware `0.2.2` không phát hai field đó và DHT11 không được ánh
-xạ vào chúng.
+## Tương thích telemetry v1/v2 và dữ liệu lịch sử
+
+Edge xác thực nghiêm ngặt cả ba discriminator:
+
+- `health.telemetry.v1` giữ `vitals.skin_temp_c` và
+  `quality.skin_temp_valid` cho node/lịch sử cũ.
+- `health.telemetry.v2` giữ `environment.ambient_temp_c`, `humidity_pct` và hai
+  cờ hợp lệ DHT11 cho node/lịch sử v2.
+- `health.telemetry.v3` chỉ dùng object `wearable` và cờ nhiệt độ cổ tay mới;
+  v3 không chấp nhận field nhiệt độ v1/v2.
 
 Migration SQLite là không phá hủy: hệ thống thêm `schema_version`,
-`ambient_temp_c`, `humidity_pct`, `ambient_temp_valid` và `humidity_valid` mà
-không xóa cột/bản ghi `skin_temp_*`. Khi đọc qua API, bản ghi v1 giữ nhiệt độ
-bề mặt lịch sử và có environment rỗng; bản ghi v2 có environment riêng và
-không giả lập nhiệt độ bề mặt. Alert `surface_temp_demo` cũ đang mở được chuyển
-sang `resolved` khi migration chạy; luật này không còn được quảng bá hoặc đánh
-giá cho dữ liệu mới. Mapping hiển thị cũ chỉ được giữ để đọc lịch sử.
+`ambient_temp_c`, `humidity_pct`, các cờ v2, rồi thêm nullable
+`wrist_surface_temp_c` và cờ `wrist_surface_temp_valid` mặc định false. Không
+xóa cột/bản ghi/raw payload `skin_temp_*` hoặc environment. API trả cấu trúc
+chuẩn hóa dạng superset: field không thuộc schema gốc là `null` với cờ `false`;
+v1/v2 không bao giờ được suy diễn thành nhiệt độ cổ tay. Alert
+`surface_temp_demo` lịch sử đã được retired/resolved và không được thay bằng
+luật sốt hay luật nhiệt độ mới.
 
 ## Event `health.event.v1`
 
@@ -142,7 +151,7 @@ trạng thái. Đây chỉ là nghi ngờ ngã trong demo, luôn cần người 
   "system": {
     "rssi_dbm": -55,
     "free_heap": 35980,
-    "fw": "0.2.2",
+    "fw": "0.3.0",
     "faults": []
   }
 }

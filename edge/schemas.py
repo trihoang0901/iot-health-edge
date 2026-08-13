@@ -4,7 +4,16 @@ import json
 import re
 from typing import Annotated, Literal, TypeAlias
 
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
+from pydantic import (
+    BaseModel,
+    BeforeValidator,
+    ConfigDict,
+    Field,
+    StrictBool,
+    StrictInt,
+    StringConstraints,
+    model_validator,
+)
 
 
 DeviceId = Annotated[
@@ -16,6 +25,19 @@ BootId = Annotated[
     StringConstraints(pattern=r"^[A-Za-z0-9_-]{4,64}$"),
 ]
 FiniteFloat = Annotated[float, Field(allow_inf_nan=False)]
+
+
+def require_json_number(value: object) -> object:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise ValueError("value must be a JSON number")
+    return value
+
+
+StrictFiniteNumber = Annotated[
+    float,
+    BeforeValidator(require_json_number),
+    Field(allow_inf_nan=False),
+]
 
 
 class StrictModel(BaseModel):
@@ -192,11 +214,113 @@ class TelemetryV2(StrictModel):
         return self
 
 
-TelemetryMessage: TypeAlias = Telemetry | TelemetryV2
+class VitalsV3(StrictModel):
+    heart_rate_bpm: Annotated[StrictFiniteNumber, Field(gt=0, le=300)] | None
+    spo2_pct: Annotated[StrictFiniteNumber, Field(ge=0, le=100)] | None
+
+
+class Wearable(StrictModel):
+    wrist_surface_temp_c: Annotated[StrictFiniteNumber, Field(ge=0, le=50)] | None
+
+
+class MotionV3(StrictModel):
+    accel_g: Annotated[StrictFiniteNumber, Field(ge=0, le=32)] | None
+    gyro_dps: Annotated[StrictFiniteNumber, Field(ge=0, le=4000)] | None
+    fall_state: Literal[
+        "idle",
+        "low_g",
+        "impact",
+        "verify_stillness",
+        "alarm",
+        "acked",
+        "refractory",
+        "unknown",
+    ]
+
+
+class QualityV3(StrictModel):
+    ppg: Annotated[StrictFiniteNumber, Field(ge=0, le=1)] | None
+    finger_present: StrictBool
+    motion_artifact: StrictBool
+    heart_rate_valid: StrictBool
+    spo2_valid: StrictBool
+    motion_valid: StrictBool
+    wrist_surface_temp_valid: StrictBool
+
+
+class SystemMetricsV3(StrictModel):
+    rssi_dbm: Annotated[StrictInt, Field(ge=-127, le=0)] | None
+    free_heap: Annotated[StrictInt, Field(ge=0)] | None
+    fw: Annotated[str, StringConstraints(min_length=1, max_length=64)]
+    faults: list[Annotated[str, StringConstraints(min_length=1, max_length=80)]]
+
+
+class TelemetryV3(StrictModel):
+    schema_version: Literal["health.telemetry.v3"] = Field(alias="schema")
+    device_id: DeviceId
+    boot_id: BootId
+    seq: Annotated[StrictInt, Field(ge=0, le=4_294_967_295)]
+    uptime_ms: Annotated[StrictInt, Field(ge=0, le=4_294_967_295)]
+    vitals: VitalsV3
+    wearable: Wearable
+    motion: MotionV3
+    quality: QualityV3
+    system: SystemMetricsV3
+
+    @model_validator(mode="after")
+    def values_follow_validity_flags(self) -> "TelemetryV3":
+        pairs = (
+            ("heart_rate", self.quality.heart_rate_valid, self.vitals.heart_rate_bpm),
+            ("spo2", self.quality.spo2_valid, self.vitals.spo2_pct),
+            (
+                "wrist_surface_temp",
+                self.quality.wrist_surface_temp_valid,
+                self.wearable.wrist_surface_temp_c,
+            ),
+        )
+        for name, valid, value in pairs:
+            if valid and value is None:
+                raise ValueError(f"{name} is valid but its value is null")
+            if not valid and value is not None:
+                raise ValueError(f"{name} is invalid; its value must be null")
+
+        motion_values = (self.motion.accel_g, self.motion.gyro_dps)
+        if self.quality.motion_valid and any(value is None for value in motion_values):
+            raise ValueError("motion is valid but a motion value is null")
+        if not self.quality.motion_valid and any(value is not None for value in motion_values):
+            raise ValueError("motion is invalid; motion values must be null")
+        if not self.quality.motion_valid and self.motion.fall_state != "unknown":
+            raise ValueError("invalid motion must use fall_state='unknown'")
+
+        if not self.quality.finger_present:
+            if self.quality.heart_rate_valid or self.quality.spo2_valid:
+                raise ValueError("PPG vitals cannot be valid without a finger")
+        if (
+            self.quality.heart_rate_valid or self.quality.spo2_valid
+        ) and self.quality.ppg is None:
+            raise ValueError("valid PPG vitals require a non-null ppg quality score")
+        if (
+            self.quality.heart_rate_valid or self.quality.spo2_valid
+        ) and not self.quality.motion_valid:
+            raise ValueError("valid PPG vitals require valid motion quality data")
+        if self.quality.motion_artifact and (
+            self.quality.heart_rate_valid or self.quality.spo2_valid
+        ):
+            raise ValueError("PPG vitals cannot be valid during motion artifact")
+
+        ds18b20_fault = "ds18b20_unavailable" in self.system.faults
+        if self.quality.wrist_surface_temp_valid and ds18b20_fault:
+            raise ValueError("valid wrist temperature cannot report ds18b20_unavailable")
+        if not self.quality.wrist_surface_temp_valid and not ds18b20_fault:
+            raise ValueError("invalid wrist temperature must report ds18b20_unavailable")
+        return self
+
+
+TelemetryMessage: TypeAlias = Telemetry | TelemetryV2 | TelemetryV3
 
 
 def parse_telemetry(raw_json: str | bytes | bytearray) -> TelemetryMessage:
-    """Parse a strict v1 or v2 telemetry document by its schema discriminator."""
+    """Parse a strict v1, v2, or v3 telemetry document by its schema discriminator."""
     payload = json.loads(raw_json)
     if not isinstance(payload, dict):
         raise ValueError("telemetry payload must be a JSON object")
@@ -205,6 +329,8 @@ def parse_telemetry(raw_json: str | bytes | bytearray) -> TelemetryMessage:
         return Telemetry.model_validate(payload)
     if schema == "health.telemetry.v2":
         return TelemetryV2.model_validate(payload)
+    if schema == "health.telemetry.v3":
+        return TelemetryV3.model_validate(payload)
     raise ValueError("unsupported telemetry schema")
 
 
