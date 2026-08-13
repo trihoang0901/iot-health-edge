@@ -16,7 +16,7 @@
 
 namespace config {
 
-constexpr char kFirmwareVersion[] = "0.3.0";
+constexpr char kFirmwareVersion[] = "0.3.1";
 
 constexpr uint8_t kI2cSdaPin = D2;       // GPIO4
 constexpr uint8_t kI2cSclPin = D1;       // GPIO5

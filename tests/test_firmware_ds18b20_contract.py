@@ -20,7 +20,7 @@ def test_ds18b20_dependencies_pin_and_firmware_version_are_pinned():
     assert "milesburton/DallasTemperature@4.0.6" in platformio
     assert "paulstoffregen/OneWire@2.3.8" in platformio
     assert "DHT sensor library" not in platformio
-    assert 'constexpr char kFirmwareVersion[] = "0.3.0";' in config
+    assert 'constexpr char kFirmwareVersion[] = "0.3.1";' in config
     assert "constexpr uint8_t kDs18b20Pin = D5;" in config
     assert "constexpr uint32_t kTemperatureConversionMs = 750;" in config
 
@@ -39,6 +39,19 @@ def test_ds18b20_conversion_is_addressed_async_and_fail_closed():
     assert "ds18b20Schedule_.retryDue(nowMs)" in source
     assert "ds18b20Schedule_.cycleDue(nowMs)" in source
     assert "ds18b20_.readPowerSupply(ds18b20Address_)" in source
+    initialize_body = source.split(
+        "bool SensorHub::initializeDs18b20(uint32_t nowMs)", maxsplit=1
+    )[1].split("void SensorHub::tickDs18b20(uint32_t nowMs)", maxsplit=1)[0]
+    pull_up = "pinMode(config::kDs18b20Pin, INPUT_PULLUP);"
+    assert pull_up in initialize_body
+    assert initialize_body.index(pull_up) < initialize_body.index(
+        "discoverDs18b20Address()"
+    )
+    retry_body = source.split(
+        "void SensorHub::tickDs18b20(uint32_t nowMs)", maxsplit=1
+    )[1]
+    assert "initializeDs18b20(nowMs);" in retry_body
+    assert "external 4.7 kOhm DATA-to-3V3 pull-up remains mandatory" in source
     assert "ds18b20_.begin()" not in source
     assert "delay(" not in source
     assert "getTempCByIndex" not in source

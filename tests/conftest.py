@@ -125,7 +125,7 @@ def valid_telemetry_v3_payload() -> dict[str, Any]:
         "system": {
             "rssi_dbm": -55,
             "free_heap": 31_000,
-            "fw": "0.3.0",
+            "fw": "0.3.1",
             "faults": [],
         },
     }

@@ -20,7 +20,7 @@ def test_post_upload_gate_is_fresh_v3_node_specific_and_locale_independent():
     assert "$device.online -eq $true" in source
     assert "$received -ge $started" in source
     assert "$schema -eq 'health.telemetry.v3'" in source
-    assert "$latest.system.fw -eq '0.3.0'" in source
+    assert "$latest.system.fw -eq '0.3.1'" in source
 
 
 def test_launcher_timestamp_style_keeps_z_and_offset_times_in_utc():

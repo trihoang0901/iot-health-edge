@@ -155,6 +155,11 @@ void SensorHub::invalidateDs18b20(uint32_t nowMs) {
 
 bool SensorHub::initializeDs18b20(uint32_t nowMs) {
   invalidateDs18b20(nowMs);
+
+  // Keep the ESP8266's weak pull-up enabled as a fail-safe for short prototype
+  // wiring. The external 4.7 kOhm DATA-to-3V3 pull-up remains mandatory for a
+  // robust wearable build; the internal pull-up is not a hardware substitute.
+  pinMode(config::kDs18b20Pin, INPUT_PULLUP);
   if (!discoverDs18b20Address()) {
     return false;
   }
