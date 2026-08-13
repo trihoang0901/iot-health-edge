@@ -9,7 +9,7 @@ ROOT = Path(__file__).resolve().parents[1]
 LAUNCHER = ROOT / "START-IOT-HEALTH-EDGE.bat"
 
 
-def test_post_upload_gate_is_fresh_v2_node_specific_and_locale_independent():
+def test_post_upload_gate_is_fresh_v3_node_specific_and_locale_independent():
     source = LAUNCHER.read_text(encoding="utf-8")
 
     assert "[Globalization.CultureInfo]::InvariantCulture" in source
@@ -19,8 +19,8 @@ def test_post_upload_gate_is_fresh_v2_node_specific_and_locale_independent():
     assert "Parse($latest.received_at,$culture,$styles)" in source
     assert "$device.online -eq $true" in source
     assert "$received -ge $started" in source
-    assert "$schema -eq 'health.telemetry.v2'" in source
-    assert "$latest.system.fw -eq '0.2.1'" in source
+    assert "$schema -eq 'health.telemetry.v3'" in source
+    assert "$latest.system.fw -eq '0.3.1'" in source
 
 
 def test_launcher_timestamp_style_keeps_z_and_offset_times_in_utc():

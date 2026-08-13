@@ -1,11 +1,14 @@
 # IoT Health Edge MVP
 
 Prototype học tập **phi lâm sàng** dùng NodeMCU ESP8266, MAX30102, cảm biến
-chuyển động MPU-6050 hoặc MPU-6500-compatible và DHT11. Node gửi dữ liệu có
+chuyển động MPU-6050 hoặc MPU-6500-compatible và DS18B20 tiếp xúc bề mặt cổ tay. Node gửi dữ liệu có
 cờ chất lượng qua MQTT; laptop nhận, lưu SQLite, áp dụng luật cảnh báo demo và
 hiển thị dashboard tiếng Việt.
 
-Không dùng kết quả để chẩn đoán, điều trị, quyết định cấp cứu hoặc thay thế thiết bị y tế. DHT11 chỉ đo nhiệt độ/độ ẩm **môi trường**, không đo nhiệt độ da, nhiệt độ cơ thể hay nhiệt độ lõi và không kích hoạt cảnh báo sức khỏe.
+Không dùng kết quả để chẩn đoán, điều trị, quyết định cấp cứu hoặc thay thế
+thiết bị y tế. DS18B20 chỉ cung cấp nhiệt độ **bề mặt tại điểm tiếp xúc** cho
+prototype; giá trị này không phải nhiệt độ cơ thể/lõi, không dùng để kết luận
+sốt và không kích hoạt cảnh báo nhiệt độ.
 
 ## Chạy nhanh nhất: simulator trước, chưa cần cắm mạch
 
@@ -66,7 +69,7 @@ Mở `http://127.0.0.1:8000`. Các kịch bản có sẵn:
 
 ```powershell
 python -m simulator --scenario motion_artifact --count 20
-python -m simulator --scenario dht_fault --count 20
+python -m simulator --scenario ds18b20_fault --count 20
 python -m simulator --scenario low_spo2 --count 20
 python -m simulator --scenario high_hr --count 20
 python -m simulator --scenario fall --count 8
@@ -102,15 +105,46 @@ phi lâm sàng, không phải hệ thống cấp cứu.
    `MQTT_HOST` không khớp một IPv4 cục bộ đang hoạt động.
 5. Xem Serial Monitor trước, sau đó kiểm tra dashboard và [checklist](docs/test-checklist.md).
 
-Linh kiện cốt lõi người dùng đã có đủ. Breadboard, dây Dupont, cáp USB data và nguồn ổn định chỉ là vật tư hỗ trợ lắp thử. DHT11 dùng DATA tại D5/GPIO14; cảm biến rời bốn chân cần pull-up 4,7–10 kΩ lên 3V3, còn nhiều module ba chân đã có sẵn điện trở này. Buzzer/nút nhấn là tùy chọn; thao tác ACK chính nằm trên dashboard.
+Linh kiện cốt lõi người dùng đã có đủ. Breadboard, dây Dupont, cáp USB data và
+nguồn ổn định chỉ là vật tư hỗ trợ lắp thử. DS18B20 dùng chế độ cấp nguồn ba dây:
+VDD lên 3V3, GND chung, DATA tại D5/GPIO14 và điện trở **4,7 kΩ** từ DATA lên
+3V3. Firmware `0.3.1` bật thêm pull-up nội yếu của ESP8266 như một fallback cho
+dây prototype ngắn; fallback này không thay thế điện trở ngoài. Bản wearable ổn
+định vẫn bắt buộc có pull-up 4,7 kΩ đúng tại DATA lên 3V3. Không dùng
+parasite-power trong cấu hình này. Buzzer/nút nhấn là tùy chọn; thao tác ACK
+chính nằm trên dashboard.
 
-Firmware `0.2.1` phát `health.telemetry.v2` với `ambient_temp_c` và
-`humidity_pct`. Edge vẫn xác thực telemetry v1 và giữ nguyên dữ liệu
-`skin_temp_*` lịch sử trong SQLite; dữ liệu cũ không bị đổi nghĩa thành số đo
-DHT11. Firmware nhận MPU-6050 có `WHO_AM_I=0x68` hoặc module
+Source firmware `0.3.1` phát strict `health.telemetry.v3` với
+`wearable.wrist_surface_temp_c` và `quality.wrist_surface_temp_valid`. Phép
+chuyển đổi DS18B20 12-bit được yêu cầu bất đồng bộ rồi đọc sau ít nhất `750 ms`;
+vòng lặp không chờ bằng `delay()`. Edge tiếp tục xác thực v1/v2 và giữ nguyên
+dữ liệu `skin_temp_*`, môi trường DHT11 cùng raw payload lịch sử trong SQLite;
+không giá trị legacy nào bị đổi nghĩa thành nhiệt độ cổ tay. Firmware nhận
+MPU-6050 có `WHO_AM_I=0x68` hoặc module
 MPU-6500-compatible có `WHO_AM_I=0x70`, cùng ở địa chỉ I2C `0x68`. Mã lỗi công
 khai cũ `mpu6050_unavailable` được giữ lại cho cả hai biến thể để không phá vỡ
 edge/dashboard. Xem chi tiết trong [hợp đồng dữ liệu](docs/data-contract.md).
+
+Firmware `0.2.2` đã sửa và được kiểm tra trên phần cứng cho đường khôi phục FIFO
+MAX30102: không dùng giá trị
+`OVF_COUNTER` đọc trước mẫu làm gate, vì counter bão hòa sau overflow lúc khởi
+động có thể giữ node trong vòng clear-and-return. Cửa sổ PPG vẫn fail-closed khi
+khoảng lấy mẫu vượt `250 ms` hoặc `check()` của thư viện SparkFun trả về từ bốn
+mẫu trong buffer cục bộ. Phiên `0.2.2` đã có raw quang học và 20 telemetry
+production liên tiếp với HR/SpO₂ hợp lệ khi đặt ngón tay ổn định; đây chỉ là
+bring-up phi lâm sàng, không chứng minh độ chính xác y tế. Source `0.3.1` giữ
+nguyên đường MAX/dual-MPU này và đã được upload trong phiên bring-up ngày
+2026-08-14. Sau khi rollback driver CH340 từ `3.9.2024.9` xuống `3.7.2022.1`,
+scanner A/B không thấy ROM ở nhánh `external_only`, nhưng nhánh có fallback
+pull-up nội tìm được family `0x28`, CRC hợp lệ, nguồn addressed ở chế độ powered
+và nhiệt độ `27.3125 °C`. Sau hard reset, Serial của production boot
+`a164b119f1fd90b3` báo firmware `0.3.1`, Wi-Fi tại `192.168.137.37` và MQTT đã
+kết nối. Telemetry mới tại `seq=23/25/28` có nhiệt độ cổ tay `27.3125 °C`, cờ
+hợp lệ, motion hợp lệ/`idle` và `sensor_faults=[]` ở cả ba mẫu. MAX30102 không
+còn fault unavailable hoặc `ppg_sample_loss`; do chưa đặt ngón tay,
+`finger_present=false` và HR/SpO₂ là `null` đúng fail-closed, nên vẫn chưa phải
+bằng chứng HR/SpO₂ mới. Dashboard hiển thị node online, nhiệt độ `27.3 °C` hợp
+lệ, firmware `0.3.1` và không có lỗi trình duyệt.
 
 ## Lưu ý về 5G
 
@@ -135,6 +169,7 @@ giới hạn đã chấp nhận của MVP phi lâm sàng, không phải cơ ch�
 - [Khắc phục sự cố](docs/troubleshooting.md)
 - [Checklist kiểm thử](docs/test-checklist.md)
 - [Thông báo Telegram](docs/telegram-notifications.md)
+- [Nhật ký bring-up DS18B20 2026-08-14](docs/journals/2026-08-14-ds18b20-hardware-bringup.md)
 
 ## Cấu trúc
 

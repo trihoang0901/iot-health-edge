@@ -94,6 +94,44 @@ def valid_telemetry_v2_payload() -> dict[str, Any]:
 
 
 @pytest.fixture
+def valid_telemetry_v3_payload() -> dict[str, Any]:
+    return {
+        "schema": "health.telemetry.v3",
+        "device_id": "health-node-01",
+        "boot_id": "boot-0003",
+        "seq": 3,
+        "uptime_ms": 3000,
+        "vitals": {
+            "heart_rate_bpm": 76.0,
+            "spo2_pct": 97.0,
+        },
+        "wearable": {
+            "wrist_surface_temp_c": 32.8,
+        },
+        "motion": {
+            "accel_g": 1.01,
+            "gyro_dps": 2.5,
+            "fall_state": "idle",
+        },
+        "quality": {
+            "ppg": 0.88,
+            "finger_present": True,
+            "motion_artifact": False,
+            "heart_rate_valid": True,
+            "spo2_valid": True,
+            "motion_valid": True,
+            "wrist_surface_temp_valid": True,
+        },
+        "system": {
+            "rssi_dbm": -55,
+            "free_heap": 31_000,
+            "fw": "0.3.1",
+            "faults": [],
+        },
+    }
+
+
+@pytest.fixture
 def app_settings(tmp_path: Path) -> Settings:
     return Settings(
         database_path=tmp_path / "test.db",

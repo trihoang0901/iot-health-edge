@@ -5,7 +5,7 @@ from datetime import UTC, datetime, timedelta
 from edge.config import DemoRuleSettings
 from edge.db import Database
 from edge.rules import RuleEngine
-from edge.schemas import Telemetry, TelemetryV2
+from edge.schemas import Telemetry, TelemetryV2, TelemetryV3
 
 
 def build_engine(tmp_path, *, hold=5.0, fall_recovery=5.0, max_sample_gap=3.0):
@@ -47,6 +47,25 @@ def test_v2_environment_never_opens_a_threshold_alert(
     }
 
     engine.evaluate(TelemetryV2.model_validate(valid_telemetry_v2_payload), now)
+
+    assert database.list_alerts(state="active") == []
+
+
+def test_v3_wrist_surface_temperature_never_opens_a_threshold_alert(
+    tmp_path, valid_telemetry_v3_payload
+):
+    database, engine = build_engine(tmp_path, hold=0.0)
+    now = datetime(2026, 8, 13, 12, 0, tzinfo=UTC)
+    database.ensure_device("health-node-01", "boot-0003", now)
+
+    for seconds, temperature in enumerate((0.0, 50.0)):
+        valid_telemetry_v3_payload["seq"] += seconds
+        valid_telemetry_v3_payload["uptime_ms"] += seconds * 1000
+        valid_telemetry_v3_payload["wearable"]["wrist_surface_temp_c"] = temperature
+        engine.evaluate(
+            TelemetryV3.model_validate(valid_telemetry_v3_payload),
+            now + timedelta(seconds=seconds),
+        )
 
     assert database.list_alerts(state="active") == []
 

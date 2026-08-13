@@ -6,7 +6,7 @@ enum SensorFault : uint8_t {
   kFaultNone = 0,
   kFaultMax30102 = 1U << 0,
   kFaultMpu6050 = 1U << 1,
-  kFaultDht11 = 1U << 2,
+  kFaultDs18b20 = 1U << 2,
   kFaultPpgOverflow = 1U << 3,
 };
 
@@ -18,8 +18,7 @@ struct NullableMeasurement {
 struct TelemetrySnapshot {
   NullableMeasurement heartRateBpm;
   NullableMeasurement spo2Pct;
-  NullableMeasurement ambientTempC;
-  NullableMeasurement humidityPct;
+  NullableMeasurement wristSurfaceTempC;
 
   float accelMagnitudeG = 0.0F;
   float gyroMagnitudeDps = 0.0F;

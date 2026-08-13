@@ -4,27 +4,34 @@
 #include <Wire.h>
 #include <math.h>
 #include <spo2_algorithm.h>
+#include <string.h>
 
 namespace {
 
-constexpr uint8_t kMax30102Address = 0x57;
-constexpr uint8_t kFifoOverflowCounterRegister = 0x05;
-constexpr uint8_t kFifoOverflowCounterMask = 0x1F;
 // SparkFun MAX3010x keeps four slots and uses one slot to distinguish head/tail,
 // so four or more samples returned by check() means older samples were overwritten.
 constexpr uint16_t kSparkFunFifoStorageSize = 4;
+constexpr uint8_t kDs18b20Family = 0x28;
+constexpr uint8_t kDs18b20ResolutionBits = 12;
+static_assert(config::kTemperatureConversionMs == Ds18b20Schedule::kConversionMs,
+              "DS18B20 conversion timing mismatch");
+static_assert(config::kTemperaturePeriodMs == Ds18b20Schedule::kCycleMs,
+              "DS18B20 cycle timing mismatch");
+static_assert(config::kSensorRetryMs == Ds18b20Schedule::kRetryMs,
+              "DS18B20 retry timing mismatch");
 
-bool isValidAmbientTemperature(float value) {
-  return isfinite(value) && value >= 0.0F && value <= 50.0F;
-}
-
-bool isValidHumidity(float value) {
-  return isfinite(value) && value >= 20.0F && value <= 90.0F;
+bool isValidWristSurfaceTemperature(float value) {
+  const bool knownDallasFailure =
+      value == DEVICE_DISCONNECTED_C || value == DEVICE_POWER_ON_RESET_C ||
+      value == DEVICE_INSUFFICIENT_POWER_C;
+  return isfinite(value) && !knownDallasFailure && fabsf(value - 85.0F) > 0.01F &&
+         value >= 0.0F && value <= 50.0F;
 }
 
 }  // namespace
 
-SensorHub::SensorHub() : dht11_(config::kDht11Pin, DHT11) {}
+SensorHub::SensorHub()
+    : oneWire_(config::kDs18b20Pin), ds18b20_(&oneWire_) {}
 
 uint32_t SensorHub::elapsed(uint32_t nowMs, uint32_t sinceMs) {
   return static_cast<uint32_t>(nowMs - sinceMs);
@@ -63,9 +70,13 @@ void SensorHub::recoverI2cBus(uint32_t nowMs) {
 }
 
 void SensorHub::begin(uint32_t nowMs) {
-  initializeMax30102(nowMs);
-  initializeImu(nowMs);
-  initializeDht11(nowMs);
+  // Discover 1-Wire before enabling the PPG FIFO. Keeping ROM discovery ahead
+  // of MAX30102 startup prevents hot-plug work from aging a live PPG window or
+  // hiding samples from the four-slot SparkFun software FIFO.
+  initializeDs18b20(nowMs);
+  const uint32_t i2cStartMs = millis();
+  initializeMax30102(i2cStartMs);
+  initializeImu(i2cStartMs);
 }
 
 bool SensorHub::initializeMax30102(uint32_t nowMs) {
@@ -106,18 +117,83 @@ bool SensorHub::initializeImu(uint32_t nowMs) {
   return mpuReady_;
 }
 
-void SensorHub::initializeDht11(uint32_t nowMs) {
-  dht11_.begin();
-  snapshot_.ambientTempC.valid = false;
-  snapshot_.humidityPct.valid = false;
-  setFault(kFaultDht11, true);
-  lastEnvironmentReadMs_ = nowMs;
+bool SensorHub::discoverDs18b20Address() {
+  DeviceAddress candidate = {};
+  oneWire_.reset_search();
+  while (oneWire_.search(candidate)) {
+    const bool validRom = OneWire::crc8(candidate, 7) == candidate[7];
+    if (validRom && candidate[0] == kDs18b20Family) {
+      memcpy(ds18b20Address_, candidate, sizeof(ds18b20Address_));
+      oneWire_.reset_search();
+      return true;
+    }
+  }
+  oneWire_.reset_search();
+  return false;
+}
+
+bool SensorHub::requestDs18b20Conversion(uint32_t nowMs) {
+  const DallasTemperature::request_t request =
+      ds18b20_.requestTemperaturesByAddress(ds18b20Address_);
+  if (!request.result) {
+    invalidateDs18b20(nowMs);
+    return false;
+  }
+
+  // Use the driver's post-command timestamp rather than a timestamp captured
+  // before 1-Wire work. Unsigned subtraction keeps this rollover-safe.
+  ds18b20Schedule_.beginConversion(static_cast<uint32_t>(request.timestamp));
+  return true;
+}
+
+void SensorHub::invalidateDs18b20(uint32_t nowMs) {
+  dsReady_ = false;
+  ds18b20Schedule_.invalidate(nowMs);
+  snapshot_.wristSurfaceTempC = NullableMeasurement{};
+  setFault(kFaultDs18b20, true);
+}
+
+bool SensorHub::initializeDs18b20(uint32_t nowMs) {
+  invalidateDs18b20(nowMs);
+
+  // Keep the ESP8266's weak pull-up enabled as a fail-safe for short prototype
+  // wiring. The external 4.7 kOhm DATA-to-3V3 pull-up remains mandatory for a
+  // robust wearable build; the internal pull-up is not a hardware substitute.
+  pinMode(config::kDs18b20Pin, INPUT_PULLUP);
+  if (!discoverDs18b20Address()) {
+    return false;
+  }
+
+  // Reset cached state, then use only addressed primitives. DallasTemperature
+  // begin() performs retry delays while scanning; calling it after MAX30102 is
+  // active could overflow SparkFun's four-slot software FIFO during hot-plug.
+  ds18b20_.setOneWire(&oneWire_);
+  // The wearable wiring contract is powered 3-wire mode. Parasite conversion
+  // would need a strong pull-up and cannot safely share this asynchronous path.
+  // DallasTemperature::readPowerSupply() returns true for parasite power
+  // (the OneWire READPOWERSUPPLY bit is zero). Reject parasite mode for the
+  // selected family-0x28 ROM; do not let another device decide its status.
+  if (ds18b20_.readPowerSupply(ds18b20Address_)) {
+    return false;
+  }
+
+  ds18b20_.setAutoSaveScratchPad(false);
+  if (!ds18b20_.isConnected(ds18b20Address_) ||
+      !ds18b20_.setResolution(ds18b20Address_, kDs18b20ResolutionBits, true) ||
+      ds18b20_.getResolution(ds18b20Address_) != kDs18b20ResolutionBits) {
+    return false;
+  }
+
+  ds18b20_.setWaitForConversion(false);
+  ds18b20_.setCheckForConversion(false);
+  dsReady_ = true;
+  return requestDs18b20Conversion(nowMs);
 }
 
 void SensorHub::tick(uint32_t nowMs) {
   if (Wire.status() != 0U) {
     recoverI2cBus(nowMs);
-    tickDht11(nowMs);
+    tickDs18b20(nowMs);
     return;
   }
 
@@ -130,14 +206,14 @@ void SensorHub::tick(uint32_t nowMs) {
   tickMax30102(nowMs);
   if (Wire.status() != 0U) {
     recoverI2cBus(nowMs);
-    tickDht11(nowMs);
+    tickDs18b20(nowMs);
     return;
   }
   tickImu(nowMs);
   if (Wire.status() != 0U) {
     recoverI2cBus(nowMs);
   }
-  tickDht11(nowMs);
+  tickDs18b20(nowMs);
 }
 
 void SensorHub::tickMax30102(uint32_t nowMs) {
@@ -145,13 +221,17 @@ void SensorHub::tickMax30102(uint32_t nowMs) {
     return;
   }
 
-  const bool samplingGap =
-      elapsed(nowMs, lastPpgTickMs_) > config::kPpgMaximumSamplingGapMs;
+  const uint32_t ppgTickGapMs = elapsed(nowMs, lastPpgTickMs_);
+  const bool samplingGap = ppgTickGapMs > config::kPpgMaximumSamplingGapMs;
   lastPpgTickMs_ = nowMs;
-  const uint8_t hardwareOverflow =
-      max30102_.readRegister8(kMax30102Address, kFifoOverflowCounterRegister) &
-      kFifoOverflowCounterMask;
-  if (samplingGap || hardwareOverflow != 0U) {
+
+  // Do not gate reads on OVF_COUNTER. A startup stall can saturate that
+  // counter, while a complete FIFO sample must be consumed before some
+  // MAX30102-compatible modules clear it. Treating the counter as a pre-read
+  // error therefore traps the sensor in an endless clear-and-return loop.
+  // The elapsed-time and local-buffer checks below still reject discontinuous
+  // PPG windows before they can produce HR/SpO2 values.
+  if (samplingGap) {
     max30102_.clearFIFO();
     resetPpgWindow();
     invalidatePpg(fingerPresent_);
@@ -360,27 +440,31 @@ void SensorHub::invalidateImu(uint32_t nowMs) {
   motionSamplePending_ = true;
 }
 
-void SensorHub::tickDht11(uint32_t nowMs) {
-  if (elapsed(nowMs, lastEnvironmentReadMs_) < config::kEnvironmentPeriodMs) {
+void SensorHub::tickDs18b20(uint32_t nowMs) {
+  if (!dsReady_) {
+    if (ds18b20Schedule_.retryDue(nowMs)) {
+      initializeDs18b20(nowMs);
+    }
     return;
   }
-  lastEnvironmentReadMs_ = nowMs;
 
-  // The library reuses the same physical sample for these back-to-back calls.
-  // Each field is validated independently so one bad value cannot be published
-  // as current, and a failed DHT read never stops the MQTT loop.
-  const float ambientTempC = dht11_.readTemperature();
-  const float humidityPct = dht11_.readHumidity();
-  snapshot_.ambientTempC.valid = isValidAmbientTemperature(ambientTempC);
-  snapshot_.humidityPct.valid = isValidHumidity(humidityPct);
-  if (snapshot_.ambientTempC.valid) {
-    snapshot_.ambientTempC.value = ambientTempC;
+  if (ds18b20Schedule_.conversionDue(nowMs)) {
+    const float value = ds18b20_.getTempC(ds18b20Address_);
+    if (!isValidWristSurfaceTemperature(value)) {
+      invalidateDs18b20(nowMs);
+      return;
+    }
+
+    snapshot_.wristSurfaceTempC.value = value;
+    ds18b20Schedule_.acceptMeasurement();
+    snapshot_.wristSurfaceTempC.valid = ds18b20Schedule_.measurementValid();
+    setFault(kFaultDs18b20, false);
+    return;
   }
-  if (snapshot_.humidityPct.valid) {
-    snapshot_.humidityPct.value = humidityPct;
+
+  if (ds18b20Schedule_.cycleDue(nowMs)) {
+    requestDs18b20Conversion(nowMs);
   }
-  setFault(kFaultDht11,
-           !snapshot_.ambientTempC.valid || !snapshot_.humidityPct.valid);
 }
 
 bool SensorHub::takeMotionSample(FallSample& sample) {

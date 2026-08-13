@@ -135,6 +135,8 @@ def test_devices_latest_history_and_overview(client, valid_telemetry_payload):
 
     assert devices.status_code == 200 and devices.json()["total"] == 1
     assert latest.json()["quality"]["ppg"] == 0.88
+    assert latest.json()["wearable"] == {"wrist_surface_temp_c": None}
+    assert latest.json()["quality"]["wrist_surface_temp_valid"] is False
     assert history.json()["total"] == 1
     assert overview.json()["device"]["device_id"] == "health-node-01"
     assert overview.json()["non_clinical"] is True
@@ -162,7 +164,36 @@ def test_existing_api_routes_expose_normalized_v2_environment(
         }
         assert item["quality"]["ambient_temp_valid"] is True
         assert item["quality"]["humidity_valid"] is True
+        assert item["quality"]["wrist_surface_temp_valid"] is False
         assert item["vitals"]["skin_temp_c"] is None
+        assert item["wearable"] == {"wrist_surface_temp_c": None}
+
+
+def test_existing_api_routes_expose_normalized_v3_wearable(
+    client, valid_telemetry_v3_payload
+):
+    assert ingest(client, "telemetry", valid_telemetry_v3_payload).accepted
+
+    latest = client.get("/api/v1/devices/health-node-01/latest").json()
+    history = client.get(
+        "/api/v1/devices/health-node-01/telemetry"
+    ).json()["data"]
+    overview = client.get(
+        "/api/v1/overview?device_id=health-node-01&window=15m"
+    ).json()
+
+    for item in (latest, history[0], overview["latest"]):
+        assert item["schema"] == item["schema_version"] == "health.telemetry.v3"
+        assert item["wearable"] == {"wrist_surface_temp_c": 32.8}
+        assert item["quality"]["wrist_surface_temp_valid"] is True
+        assert item["environment"] == {
+            "ambient_temp_c": None,
+            "humidity_pct": None,
+        }
+        assert item["quality"]["ambient_temp_valid"] is False
+        assert item["quality"]["humidity_valid"] is False
+        assert item["vitals"]["skin_temp_c"] is None
+        assert item["quality"]["skin_temp_valid"] is False
 
 
 def test_overview_accepts_plain_minutes_and_rejects_invalid_window(client):

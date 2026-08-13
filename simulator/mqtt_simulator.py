@@ -17,7 +17,7 @@ from typing import Any, Iterator, Literal
 
 SCENARIOS = (
     "normal",
-    "dht_fault",
+    "ds18b20_fault",
     "motion_artifact",
     "low_spo2",
     "high_hr",
@@ -26,7 +26,7 @@ SCENARIOS = (
 )
 DEVICE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}$")
 UINT32_MAX = 4_294_967_295
-SIMULATOR_FW = "simulator-1.1.0"
+SIMULATOR_FW = "simulator-1.2.0"
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,8 +108,7 @@ class ScenarioStream:
         jitter = self.random.uniform(-1.0, 1.0)
         heart_rate: float | None = round(72.0 + (jitter * 2.0), 1)
         spo2: float | None = round(98.0 + (jitter * 0.3), 1)
-        ambient_temp: float | None = round(25.0 + (jitter * 0.4), 1)
-        humidity: float | None = round(58.0 + (jitter * 1.5), 1)
+        wrist_surface_temp: float | None = round(33.0 + (jitter * 0.4), 1)
         accel: float | None = round(1.0 + (jitter * 0.03), 3)
         gyro: float | None = round(abs(jitter) * 3.0, 2)
         fall_state = "idle"
@@ -118,17 +117,14 @@ class ScenarioStream:
         motion_artifact = False
         heart_rate_valid = True
         spo2_valid = True
-        ambient_temp_valid = True
-        humidity_valid = True
+        wrist_surface_temp_valid = True
         motion_valid = True
         faults: list[str] = []
 
-        if scenario == "dht_fault":
-            ambient_temp = None
-            humidity = None
-            ambient_temp_valid = False
-            humidity_valid = False
-            faults = ["dht11_unavailable"]
+        if scenario == "ds18b20_fault":
+            wrist_surface_temp = None
+            wrist_surface_temp_valid = False
+            faults = ["ds18b20_unavailable"]
         elif scenario == "motion_artifact":
             heart_rate = None
             spo2 = None
@@ -183,7 +179,7 @@ class ScenarioStream:
         return Message(
             topic=self.topic("telemetry"),
             payload={
-                "schema": "health.telemetry.v2",
+                "schema": "health.telemetry.v3",
                 "device_id": self.config.device_id,
                 "boot_id": self.boot_id,
                 "seq": self.seq,
@@ -192,9 +188,8 @@ class ScenarioStream:
                     "heart_rate_bpm": heart_rate,
                     "spo2_pct": spo2,
                 },
-                "environment": {
-                    "ambient_temp_c": ambient_temp,
-                    "humidity_pct": humidity,
+                "wearable": {
+                    "wrist_surface_temp_c": wrist_surface_temp,
                 },
                 "motion": {
                     "accel_g": accel,
@@ -207,8 +202,7 @@ class ScenarioStream:
                     "motion_artifact": motion_artifact,
                     "heart_rate_valid": heart_rate_valid,
                     "spo2_valid": spo2_valid,
-                    "ambient_temp_valid": ambient_temp_valid,
-                    "humidity_valid": humidity_valid,
+                    "wrist_surface_temp_valid": wrist_surface_temp_valid,
                     "motion_valid": motion_valid,
                 },
                 "system": self.system(faults),

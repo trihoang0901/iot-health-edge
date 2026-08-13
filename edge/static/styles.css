@@ -137,7 +137,7 @@ a:focus-visible { outline: 3px solid #7dc8e1; outline-offset: 2px; }
 
 .metric-grid {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 1rem;
 }
 

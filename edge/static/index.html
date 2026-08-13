@@ -66,20 +66,11 @@
 
         <article class="metric-card">
           <div class="metric-heading">
-            <h2>Nhiệt độ môi trường</h2>
-            <span id="ambient-temp-quality" class="quality-label">Chưa có dữ liệu</span>
+            <h2>Nhiệt độ bề mặt cổ tay</h2>
+            <span id="wrist-temp-quality" class="quality-label">Chưa có dữ liệu</span>
           </div>
-          <p class="metric-value"><span id="ambient-temp">—</span> <small>°C</small></p>
-          <p class="metric-note">Giá trị môi trường từ DHT11, không phải nhiệt độ cơ thể</p>
-        </article>
-
-        <article class="metric-card">
-          <div class="metric-heading">
-            <h2>Độ ẩm môi trường</h2>
-            <span id="humidity-quality" class="quality-label">Chưa có dữ liệu</span>
-          </div>
-          <p class="metric-value"><span id="humidity">—</span> <small>%</small></p>
-          <p class="metric-note">Độ ẩm tương đối từ DHT11</p>
+          <p class="metric-value"><span id="wrist-temp">—</span> <small>°C</small></p>
+          <p class="metric-note">Giá trị tiếp xúc phi lâm sàng từ DS18B20; không phải nhiệt độ cơ thể/lõi</p>
         </article>
       </section>
 
@@ -113,8 +104,7 @@
               <select id="chart-metric">
                 <option value="heart_rate_bpm">Nhịp tim</option>
                 <option value="spo2_pct">SpO₂</option>
-                <option value="ambient_temp_c">Nhiệt độ môi trường</option>
-                <option value="humidity_pct">Độ ẩm môi trường</option>
+                <option value="wrist_surface_temp_c">Nhiệt độ bề mặt cổ tay</option>
               </select>
             </label>
           </div>

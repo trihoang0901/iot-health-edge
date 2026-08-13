@@ -113,7 +113,7 @@ Thử các nhánh:
 
 ```powershell
 python -m simulator --scenario motion_artifact --count 20
-python -m simulator --scenario dht_fault --count 20
+python -m simulator --scenario ds18b20_fault --count 20
 python -m simulator --scenario low_spo2 --count 20
 python -m simulator --scenario high_hr --count 20
 python -m simulator --scenario fall --count 8
@@ -153,12 +153,14 @@ Ngưỡng demo có khoảng giữ mặc định nên `low_spo2`/`high_hr` cần 
    pio device monitor --baud 115200
    ```
 
-8. Xác nhận Serial có `wifi_connected` và `mqtt_connected`; API có bản tin mới
-   `health.telemetry.v2`, firmware `0.2.1` và thiết bị `online=true`. Broker
-   phải thấy client của health node. DHT11 hợp lệ sẽ có
-   `environment.ambient_temp_c`/`humidity_pct`; nếu chưa đọc được, hai giá trị
-   phải là `null`, cờ hợp lệ là `false` và có `dht11_unavailable` nhưng node
-   vẫn phải online.
+8. Source hiện tại là firmware `0.3.1` và đã được upload trong phiên bring-up
+   2026-08-14. Sau hard reset, Serial boot `a164b119f1fd90b3` báo firmware
+   `0.3.1`, `wifi_connected ip=192.168.137.37` và `mqtt_connected`. API nhận
+   `health.telemetry.v3` tại `seq=23/25/28`, nhiệt độ `27.3125 °C`, motion
+   hợp lệ/`idle` và `sensor_faults=[]`. Máy Windows của phiên thử đã rollback driver CH340 từ
+   `3.9.2024.9` xuống `3.7.2022.1`; không tự áp dụng rollback này trên máy khác
+   nếu COM/upload vẫn hoạt động. Mỗi lần nạp sau vẫn phải xác nhận telemetry mới
+   có `system.fw="0.3.1"`, `seq` tăng và thiết bị `online=true`.
 9. Với cảm biến chuyển động, I2C scanner phải thấy địa chỉ `0x68`, nhưng ACK
    này chưa phải kết quả đạt. Đọc tiếp `WHO_AM_I` (`0x75`): `0x68` là
    MPU-6050, `0x70` là MPU-6500-compatible. Sau đó xác nhận đọc đủ 14 byte từ
@@ -166,6 +168,26 @@ Ngưỡng demo có khoảng giữ mặc định nên `low_spo2`/`high_hr` cần 
    `quality.motion_valid=true`, accel/gyro hữu hạn và không có fault cũ
    `mpu6050_unavailable`. Chưa có đủ bằng chứng này thì để checklist phần cứng
    ở trạng thái chưa hoàn thành.
+10. Với MAX30102, xác nhận raw red/IR thay đổi rõ khi đặt ngón tay đúng và ổn
+    định. Firmware `0.2.2` đã được kiểm tra không chặn đọc theo pre-read
+    `OVF_COUNTER`, nhưng vẫn
+    fail-closed nếu khoảng lấy mẫu vượt `250 ms` hoặc SparkFun `check()` fetch
+    từ bốn mẫu. Chỉ đánh dấu HR/SpO₂ đạt sau khi telemetry cuối có giá trị và cờ
+    hợp lệ đúng; raw quang học riêng lẻ chưa đủ.
+11. DS18B20 phải ở powered three-wire: VDD=3V3, GND chung, DATA=D5/GPIO14 và
+    pull-up ngoài 4,7 kΩ từ DATA lên 3V3. Source `0.3.1` bật thêm pull-up nội yếu
+    như fallback prototype và yêu cầu chuyển đổi 12-bit bất đồng bộ rồi đọc sau
+    ít nhất `750 ms`; không chờ bằng `delay(750)`. Scanner A/B của phiên thử
+    không tìm thấy ROM ở `external_only`, nhưng nhánh có fallback pull-up nội
+    tìm được family `0x28`, CRC hợp lệ, powered và `27.3125 °C`. Kết quả này
+    không cho phép bỏ điện trở ngoài trên wearable. Khi cảm biến lỗi, v3 vẫn
+    phải phát `wearable.wrist_surface_temp_c=null`,
+    `quality.wrist_surface_temp_valid=false`, fault `ds18b20_unavailable` và
+    duy trì MAX30102, dual-MPU cùng MQTT. Sau hard reset, MAX30102 không còn
+    unavailable hoặc `ppg_sample_loss`; chưa đặt ngón tay nên HR/SpO₂ là `null`
+    đúng fail-closed và vẫn cần retest ngón tay riêng. Dashboard đã hiển thị
+    online, nhiệt độ `27.3 °C` hợp lệ, firmware `0.3.1` và không có lỗi trình
+    duyệt.
 
 Launcher trên cố ý dành cho broker local. Nếu kiến trúc dùng broker đầu xa,
 không bỏ qua gate bằng cách giả địa chỉ local; dùng quy trình thủ công và các

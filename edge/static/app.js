@@ -9,12 +9,10 @@ const elements = {
   latestDataState: document.querySelector("#latest-data-state"),
   heartRate: document.querySelector("#heart-rate"),
   spo2: document.querySelector("#spo2"),
-  ambientTemp: document.querySelector("#ambient-temp"),
-  humidity: document.querySelector("#humidity"),
+  wristTemp: document.querySelector("#wrist-temp"),
   heartQuality: document.querySelector("#heart-quality"),
   spo2Quality: document.querySelector("#spo2-quality"),
-  ambientTempQuality: document.querySelector("#ambient-temp-quality"),
-  humidityQuality: document.querySelector("#humidity-quality"),
+  wristTempQuality: document.querySelector("#wrist-temp-quality"),
   qualitySummary: document.querySelector("#quality-summary"),
   fingerState: document.querySelector("#finger-state"),
   ppgQuality: document.querySelector("#ppg-quality"),
@@ -39,8 +37,7 @@ const elements = {
 const chartDefinitions = {
   heart_rate_bpm: { label: "Nhịp tim", unit: "bpm", group: "vitals" },
   spo2_pct: { label: "SpO₂", unit: "%", group: "vitals" },
-  ambient_temp_c: { label: "Nhiệt độ môi trường", unit: "°C", group: "environment" },
-  humidity_pct: { label: "Độ ẩm môi trường", unit: "%", group: "environment" },
+  wrist_surface_temp_c: { label: "Nhiệt độ bề mặt cổ tay", unit: "°C", group: "wearable" },
 };
 
 let selectedDevice = "";
@@ -115,9 +112,8 @@ function setConnection(device) {
 }
 
 function clearLatest() {
-  [elements.heartRate, elements.spo2, elements.ambientTemp, elements.humidity].forEach((item) => { item.textContent = "—"; });
-  [elements.heartQuality, elements.spo2Quality, elements.ambientTempQuality,
-    elements.humidityQuality].forEach((item) => {
+  [elements.heartRate, elements.spo2, elements.wristTemp].forEach((item) => { item.textContent = "—"; });
+  [elements.heartQuality, elements.spo2Quality, elements.wristTempQuality].forEach((item) => {
     item.className = "quality-label";
     item.textContent = "Chưa có dữ liệu";
   });
@@ -158,31 +154,41 @@ function renderLatest(latest, online) {
     return;
   }
   const vitals = latest.vitals || {};
-  const environment = latest.environment || {};
+  const wearable = latest.wearable || {};
   const quality = latest.quality || {};
   const motion = latest.motion || {};
   const system = latest.system || {};
   const stale = !online;
+  const schema = latest.schema || latest.schema_version;
+  const isWearableV3 = schema === "health.telemetry.v3";
   elements.heartRate.textContent = formatNumber(vitals.heart_rate_bpm);
   elements.spo2.textContent = formatNumber(vitals.spo2_pct, 1);
-  elements.ambientTemp.textContent = formatNumber(environment.ambient_temp_c, 1);
-  elements.humidity.textContent = formatNumber(environment.humidity_pct, 1);
+  elements.wristTemp.textContent = isWearableV3
+    ? formatNumber(wearable.wrist_surface_temp_c, 1)
+    : "—";
 
   if (stale) {
-    [elements.heartQuality, elements.spo2Quality, elements.ambientTempQuality,
-      elements.humidityQuality].forEach((item) => {
+    [elements.heartQuality, elements.spo2Quality].forEach((item) => {
       item.className = "quality-label quality-warning";
       item.textContent = "Dữ liệu cũ";
     });
+    elements.wristTempQuality.className = "quality-label quality-warning";
+    elements.wristTempQuality.textContent = isWearableV3
+      ? "Dữ liệu cũ"
+      : "Không có trong telemetry v1/v2";
   } else {
     setQualityLabel(elements.heartQuality, quality.heart_rate_valid, quality.finger_present ? "Không tin cậy" : "Chưa đặt ngón tay");
     setQualityLabel(elements.spo2Quality, quality.spo2_valid, quality.finger_present ? "Không tin cậy" : "Chưa đặt ngón tay");
-    setQualityLabel(elements.ambientTempQuality, quality.ambient_temp_valid, "DHT11 không sẵn sàng");
-    setQualityLabel(elements.humidityQuality, quality.humidity_valid, "DHT11 không sẵn sàng");
+    if (isWearableV3) {
+      setQualityLabel(elements.wristTempQuality, quality.wrist_surface_temp_valid, "DS18B20 không sẵn sàng");
+    } else {
+      elements.wristTempQuality.className = "quality-label";
+      elements.wristTempQuality.textContent = "Không có trong telemetry v1/v2";
+    }
   }
 
   const allValid = quality.heart_rate_valid && quality.spo2_valid
-    && quality.ambient_temp_valid && quality.humidity_valid;
+    && (!isWearableV3 || quality.wrist_surface_temp_valid);
   elements.qualitySummary.className = `quality-badge ${allValid ? "quality-good" : "quality-warning"}`;
   elements.qualitySummary.textContent = stale
     ? "Dữ liệu cũ"
@@ -200,6 +206,8 @@ function renderLatest(latest, online) {
 
 function metricValue(item, key) {
   const definition = chartDefinitions[key];
+  const schema = item && (item.schema || item.schema_version);
+  if (key === "wrist_surface_temp_c" && schema !== "health.telemetry.v3") return null;
   return item && definition && item[definition.group] ? item[definition.group][key] : null;
 }
 
@@ -218,7 +226,7 @@ function renderChart() {
   }
   const rawMin = Math.min(...values.map((point) => point.value));
   const rawMax = Math.max(...values.map((point) => point.value));
-  const padding = Math.max((rawMax - rawMin) * 0.12, key === "ambient_temp_c" ? 0.2 : 1);
+  const padding = Math.max((rawMax - rawMin) * 0.12, key === "wrist_surface_temp_c" ? 0.2 : 1);
   const min = rawMin - padding;
   const max = rawMax + padding;
   const xStart = 52;

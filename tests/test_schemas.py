@@ -11,6 +11,7 @@ from edge.schemas import (
     FallEvent,
     Telemetry,
     TelemetryV2,
+    TelemetryV3,
     parse_telemetry,
     parse_topic,
 )
@@ -24,17 +25,24 @@ def test_valid_exact_telemetry_schema_is_accepted(valid_telemetry_payload):
     assert telemetry.quality.ppg == 0.88
 
 
-def test_parser_accepts_strict_v1_and_v2_without_weakening_v1_class(
-    valid_telemetry_payload, valid_telemetry_v2_payload
+def test_parser_accepts_strict_v1_v2_and_v3_without_weakening_older_classes(
+    valid_telemetry_payload,
+    valid_telemetry_v2_payload,
+    valid_telemetry_v3_payload,
 ):
     v1 = parse_telemetry(json.dumps(valid_telemetry_payload))
     v2 = parse_telemetry(json.dumps(valid_telemetry_v2_payload).encode())
+    v3 = parse_telemetry(bytearray(json.dumps(valid_telemetry_v3_payload).encode()))
 
     assert isinstance(v1, Telemetry)
     assert isinstance(v2, TelemetryV2)
+    assert isinstance(v3, TelemetryV3)
     assert v2.environment.ambient_temp_c == 28.5
+    assert v3.wearable.wrist_surface_temp_c == 32.8
     with pytest.raises(ValidationError):
         Telemetry.model_validate(valid_telemetry_v2_payload)
+    with pytest.raises(ValidationError):
+        TelemetryV2.model_validate(valid_telemetry_v3_payload)
 
 
 def test_v2_environment_bounds_and_validity_are_strict(valid_telemetry_v2_payload):
@@ -92,9 +100,94 @@ def test_v2_dht_failure_and_only_exact_v2_fields_are_accepted(
         TelemetryV2.model_validate(payload)
 
 
+def test_v3_wrist_surface_temperature_bounds_and_finite_values_are_strict(
+    valid_telemetry_v3_payload,
+):
+    for value in (0.0, 50.0):
+        payload = json.loads(json.dumps(valid_telemetry_v3_payload))
+        payload["wearable"]["wrist_surface_temp_c"] = value
+        parsed = TelemetryV3.model_validate(payload)
+        assert parsed.wearable.wrist_surface_temp_c == value
+
+    for value in (-0.1, 50.1, float("nan"), float("inf"), float("-inf")):
+        payload = json.loads(json.dumps(valid_telemetry_v3_payload))
+        payload["wearable"]["wrist_surface_temp_c"] = value
+        with pytest.raises(ValidationError):
+            TelemetryV3.model_validate(payload)
+
+
+def test_v3_wrist_surface_value_follows_validity_flag(valid_telemetry_v3_payload):
+    payload = json.loads(json.dumps(valid_telemetry_v3_payload))
+    payload["quality"]["wrist_surface_temp_valid"] = False
+    with pytest.raises(ValidationError, match="must be null"):
+        TelemetryV3.model_validate(payload)
+
+    payload["wearable"]["wrist_surface_temp_c"] = None
+    payload["system"]["faults"] = ["ds18b20_unavailable"]
+    assert TelemetryV3.model_validate(payload).wearable.wrist_surface_temp_c is None
+
+    payload["quality"]["wrist_surface_temp_valid"] = True
+    with pytest.raises(ValidationError, match="value is null"):
+        TelemetryV3.model_validate(payload)
+
+
+@pytest.mark.parametrize(
+    ("section", "field", "value"),
+    [
+        ("wearable", "wrist_surface_temp_c", "32.8"),
+        ("wearable", "wrist_surface_temp_c", True),
+        ("quality", "wrist_surface_temp_valid", 1),
+        ("quality", "finger_present", 1),
+        ("motion", "accel_g", "1.0"),
+    ],
+)
+def test_v3_rejects_coercible_non_json_types(
+    valid_telemetry_v3_payload, section, field, value
+):
+    payload = json.loads(json.dumps(valid_telemetry_v3_payload))
+    payload[section][field] = value
+
+    with pytest.raises(ValidationError):
+        TelemetryV3.model_validate(payload)
+
+
+def test_v3_wrist_validity_and_ds18b20_fault_are_consistent(
+    valid_telemetry_v3_payload,
+):
+    valid_payload = json.loads(json.dumps(valid_telemetry_v3_payload))
+    valid_payload["system"]["faults"] = ["ds18b20_unavailable"]
+    with pytest.raises(ValidationError, match="valid wrist temperature"):
+        TelemetryV3.model_validate(valid_payload)
+
+    invalid_payload = json.loads(json.dumps(valid_telemetry_v3_payload))
+    invalid_payload["wearable"]["wrist_surface_temp_c"] = None
+    invalid_payload["quality"]["wrist_surface_temp_valid"] = False
+    with pytest.raises(ValidationError, match="must report ds18b20_unavailable"):
+        TelemetryV3.model_validate(invalid_payload)
+
+    invalid_payload["system"]["faults"] = ["ds18b20_unavailable"]
+    assert TelemetryV3.model_validate(invalid_payload).wearable.wrist_surface_temp_c is None
+
+
+def test_v3_ds18b20_failure_and_only_exact_v3_fields_are_accepted(
+    valid_telemetry_v3_payload,
+):
+    payload = json.loads(json.dumps(valid_telemetry_v3_payload))
+    payload["wearable"]["wrist_surface_temp_c"] = None
+    payload["quality"]["wrist_surface_temp_valid"] = False
+    payload["system"]["faults"] = ["ds18b20_unavailable"]
+    assert TelemetryV3.model_validate(payload).system.faults == [
+        "ds18b20_unavailable"
+    ]
+
+    payload["environment"] = {"ambient_temp_c": 28.5, "humidity_pct": 63.0}
+    with pytest.raises(ValidationError, match="Extra inputs are not permitted"):
+        TelemetryV3.model_validate(payload)
+
+
 def test_telemetry_parser_rejects_unknown_or_non_object_schema():
     with pytest.raises(ValueError, match="unsupported telemetry schema"):
-        parse_telemetry('{"schema":"health.telemetry.v3"}')
+        parse_telemetry('{"schema":"health.telemetry.v4"}')
     with pytest.raises(ValueError, match="JSON object"):
         parse_telemetry("[]")
 
