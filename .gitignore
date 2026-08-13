@@ -1,0 +1,57 @@
+# Local configuration and credentials
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+secrets.h
+secrets.*.h
+!secrets.example.h
+secrets*.json
+!secrets.example.json
+credentials*.json
+!credentials.example.json
+deploy/mosquitto/generated/
+
+# Python
+.venv/
+.platformio-venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+coverage.xml
+htmlcov/
+*.egg-info/
+build/
+dist/
+
+# Runtime data
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+data/
+
+# PlatformIO and editors
+.pio/
+.codex-tmp/
+*.bin
+*.elf
+*.exe
+*.hex
+*.map
+*.log
+.vscode/
+.idea/
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini

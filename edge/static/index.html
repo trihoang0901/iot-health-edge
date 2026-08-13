@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="vi">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="light">
+    <title>Giám sát sức khỏe thử nghiệm</title>
+    <link rel="icon" href="/static/favicon.svg?v=__ASSET_VERSION__" type="image/svg+xml">
+    <link rel="stylesheet" href="/static/styles.css?v=__ASSET_VERSION__">
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">Bỏ qua đến nội dung chính</a>
+    <header class="site-header">
+      <div>
+        <p class="eyebrow">IoT health edge</p>
+        <h1>Giám sát sức khỏe thử nghiệm</h1>
+      </div>
+      <div id="connection-pill" class="status-pill status-waiting" role="status">
+        <span aria-hidden="true">●</span>
+        <span id="connection-text">Đang kết nối</span>
+      </div>
+    </header>
+
+    <aside class="warning-banner" aria-label="Cảnh báo phạm vi sử dụng">
+      <strong>Prototype phi lâm sàng</strong>
+      <span>Không dùng số liệu hoặc cảnh báo của hệ thống để chẩn đoán hay xử trí y tế.</span>
+    </aside>
+
+    <main id="main-content">
+      <section class="toolbar" aria-labelledby="device-heading">
+        <div>
+          <h2 id="device-heading">Thiết bị</h2>
+          <p id="last-update" class="muted">Chưa nhận dữ liệu</p>
+        </div>
+        <label>
+          <span class="sr-only">Chọn thiết bị</span>
+          <select id="device-select" aria-label="Chọn thiết bị">
+            <option value="">Đang tải thiết bị…</option>
+          </select>
+        </label>
+      </section>
+
+      <p id="latest-data-state" class="cache-notice" role="status" aria-live="polite" hidden>
+        <strong>Dữ liệu cũ</strong>
+        <span>Các giá trị bên dưới là lần ghi nhận cuối, không phải dữ liệu trực tiếp.</span>
+      </p>
+
+      <section class="metric-grid" aria-label="Số đo mới nhất">
+        <article class="metric-card">
+          <div class="metric-heading">
+            <h2>Nhịp tim</h2>
+            <span id="heart-quality" class="quality-label">Chưa có dữ liệu</span>
+          </div>
+          <p class="metric-value"><span id="heart-rate">—</span> <small>bpm</small></p>
+          <p class="metric-note">Giá trị tham khảo từ MAX30102</p>
+        </article>
+
+        <article class="metric-card">
+          <div class="metric-heading">
+            <h2>SpO₂ tham khảo</h2>
+            <span id="spo2-quality" class="quality-label">Chưa có dữ liệu</span>
+          </div>
+          <p class="metric-value"><span id="spo2">—</span> <small>%</small></p>
+          <p class="metric-note">Không phải máy đo SpO₂ y tế</p>
+        </article>
+
+        <article class="metric-card">
+          <div class="metric-heading">
+            <h2>Nhiệt độ môi trường</h2>
+            <span id="ambient-temp-quality" class="quality-label">Chưa có dữ liệu</span>
+          </div>
+          <p class="metric-value"><span id="ambient-temp">—</span> <small>°C</small></p>
+          <p class="metric-note">Giá trị môi trường từ DHT11, không phải nhiệt độ cơ thể</p>
+        </article>
+
+        <article class="metric-card">
+          <div class="metric-heading">
+            <h2>Độ ẩm môi trường</h2>
+            <span id="humidity-quality" class="quality-label">Chưa có dữ liệu</span>
+          </div>
+          <p class="metric-value"><span id="humidity">—</span> <small>%</small></p>
+          <p class="metric-note">Độ ẩm tương đối từ DHT11</p>
+        </article>
+      </section>
+
+      <section class="detail-grid">
+        <article class="panel quality-panel" aria-labelledby="quality-heading">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">Chất lượng dữ liệu</p>
+              <h2 id="quality-heading">Tình trạng phép đo</h2>
+            </div>
+            <span id="quality-summary" class="quality-badge">Chưa có dữ liệu</span>
+          </div>
+          <dl class="quality-list">
+            <div><dt>Ngón tay</dt><dd id="finger-state">—</dd></div>
+            <div><dt>Chất lượng PPG</dt><dd id="ppg-quality">—</dd></div>
+            <div><dt>Nhiễu chuyển động</dt><dd id="motion-artifact">—</dd></div>
+            <div><dt>Trạng thái ngã</dt><dd id="fall-state">—</dd></div>
+            <div><dt>Wi‑Fi</dt><dd id="rssi">—</dd></div>
+            <div><dt>Firmware</dt><dd id="firmware">—</dd></div>
+          </dl>
+        </article>
+
+        <article class="panel chart-panel" aria-labelledby="chart-heading">
+          <div class="section-heading">
+            <div>
+              <p class="eyebrow">15 phút gần nhất</p>
+              <h2 id="chart-heading">Xu hướng số đo</h2>
+            </div>
+            <label class="chart-control">
+              <span class="sr-only">Chọn số đo biểu diễn</span>
+              <select id="chart-metric">
+                <option value="heart_rate_bpm">Nhịp tim</option>
+                <option value="spo2_pct">SpO₂</option>
+                <option value="ambient_temp_c">Nhiệt độ môi trường</option>
+                <option value="humidity_pct">Độ ẩm môi trường</option>
+              </select>
+            </label>
+          </div>
+          <div id="chart-empty" class="chart-empty">Chưa đủ dữ liệu để vẽ biểu đồ.</div>
+          <svg id="chart" class="chart" viewBox="0 0 800 250" role="img" aria-labelledby="chart-title chart-desc">
+            <title id="chart-title">Biểu đồ xu hướng 15 phút</title>
+            <desc id="chart-desc">Chưa có dữ liệu.</desc>
+            <line class="grid-line" x1="52" y1="24" x2="780" y2="24"></line>
+            <line class="grid-line" x1="52" y1="119" x2="780" y2="119"></line>
+            <line class="grid-line" x1="52" y1="214" x2="780" y2="214"></line>
+            <text id="chart-max" class="axis-label" x="4" y="29">—</text>
+            <text id="chart-mid" class="axis-label" x="4" y="124">—</text>
+            <text id="chart-min" class="axis-label" x="4" y="219">—</text>
+            <polyline id="chart-line" class="chart-line" points=""></polyline>
+          </svg>
+        </article>
+      </section>
+
+      <section class="panel alerts-panel" aria-labelledby="alerts-heading">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Cần chú ý</p>
+            <h2 id="alerts-heading">Cảnh báo đang hoạt động</h2>
+          </div>
+          <span id="alert-count" class="count-badge">0 cảnh báo</span>
+        </div>
+        <div id="active-alerts" class="alert-list" aria-live="polite">
+          <p class="empty-state">Chưa có cảnh báo đang hoạt động.</p>
+        </div>
+      </section>
+
+      <section class="panel alerts-panel" aria-labelledby="history-heading">
+        <div class="section-heading">
+          <div>
+            <p class="eyebrow">Lịch sử gần đây</p>
+            <h2 id="history-heading">Cảnh báo đã kết thúc</h2>
+          </div>
+        </div>
+        <div id="resolved-alerts" class="alert-list">
+          <p class="empty-state">Chưa có lịch sử cảnh báo.</p>
+        </div>
+      </section>
+
+      <p id="dashboard-message" class="dashboard-message" role="status" aria-live="polite"></p>
+    </main>
+
+    <footer>
+      Dữ liệu lưu cục bộ trên laptop edge. Nút “Đã xem” không có nghĩa cảnh báo đã được xử lý.
+    </footer>
+    <script src="/static/app.js?v=__ASSET_VERSION__" defer></script>
+  </body>
+</html>

@@ -1,0 +1,82 @@
+name: iot-health-edge
+
+services:
+  mosquitto:
+    image: eclipse-mosquitto:2.0.22
+    container_name: iot-health-mosquitto
+    restart: unless-stopped
+    ports:
+      - "1883:1883"
+    volumes:
+      - ./mosquitto/mosquitto.conf:/mosquitto/config/mosquitto.conf:ro
+      # The official entrypoint must chown generated password/ACL files to uid 1883.
+      # Keep the static broker config read-only, but allow metadata updates here.
+      - ./mosquitto/generated:/mosquitto/config/generated
+      - mosquitto-data:/mosquitto/data
+
+  edge:
+    profiles: ["full"]
+    build:
+      context: ..
+      dockerfile: edge/Dockerfile
+    container_name: iot-health-edge-api
+    restart: unless-stopped
+    init: true
+    depends_on:
+      mosquitto:
+        condition: service_started
+    environment:
+      EDGE_HOST: 0.0.0.0
+      EDGE_PORT: "8000"
+      EDGE_DATABASE_PATH: /app/data/health-edge.db
+      EDGE_ALLOWED_HOSTS: ${EDGE_ALLOWED_HOSTS:-127.0.0.1,localhost,edge}
+      EDGE_QUEUE_SIZE: ${EDGE_QUEUE_SIZE:-1000}
+      EDGE_MAX_PAYLOAD_BYTES: ${EDGE_MAX_PAYLOAD_BYTES:-4096}
+      EDGE_TELEMETRY_RETENTION_ROWS: ${EDGE_TELEMETRY_RETENTION_ROWS:-50000}
+      DEVICE_OFFLINE_AFTER_SECONDS: ${DEVICE_OFFLINE_AFTER_SECONDS:-15}
+      DEMO_MAX_SAMPLE_GAP_SECONDS: ${DEMO_MAX_SAMPLE_GAP_SECONDS:-3}
+      TELEGRAM_ENABLED: ${TELEGRAM_ENABLED:-false}
+      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
+      TELEGRAM_CHAT_ID: ${TELEGRAM_CHAT_ID:-}
+      TELEGRAM_REQUEST_TIMEOUT_SECONDS: ${TELEGRAM_REQUEST_TIMEOUT_SECONDS:-5}
+      TELEGRAM_MAX_ATTEMPTS: ${TELEGRAM_MAX_ATTEMPTS:-3}
+      TELEGRAM_RETRY_BASE_SECONDS: ${TELEGRAM_RETRY_BASE_SECONDS:-1}
+      TELEGRAM_RETRY_MAX_SECONDS: ${TELEGRAM_RETRY_MAX_SECONDS:-30}
+      TELEGRAM_QUEUE_SIZE: ${TELEGRAM_QUEUE_SIZE:-100}
+      TELEGRAM_SHUTDOWN_TIMEOUT_SECONDS: ${TELEGRAM_SHUTDOWN_TIMEOUT_SECONDS:-6}
+      MQTT_ENABLED: "true"
+      MQTT_HOST: mosquitto
+      MQTT_PORT: "1883"
+      MQTT_USERNAME: ${MQTT_USERNAME:-health_edge}
+      MQTT_PASSWORD: ${MQTT_PASSWORD:-}
+      MQTT_CLIENT_ID: ${MQTT_CLIENT_ID:-iot-health-edge-docker}
+    ports:
+      - "127.0.0.1:8000:8000"
+    volumes:
+      - edge-data:/app/data
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - >-
+          import json, urllib.request;
+          data=json.load(urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=2));
+          raise SystemExit(0 if data.get('status') == 'ok' else 1)
+      interval: 10s
+      timeout: 3s
+      retries: 6
+      start_period: 20s
+    # Worst case: ingestion stop (5s) + Telegram shutdown (<=30s) + margin.
+    stop_grace_period: 40s
+
+volumes:
+  mosquitto-data:
+  edge-data:
