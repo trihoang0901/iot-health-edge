@@ -112,3 +112,4 @@ def build_schedule(
 
 def public_profiles() -> list[dict[str, object]]:
     return [PROFILES[name].public_dict() for name in sorted(PROFILES)]
+
