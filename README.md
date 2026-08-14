@@ -41,7 +41,7 @@ Evidence kỹ thuật khóa ngày 14/08/2026:
   `4bce098e63c53ab20bc7d9ab37162848504160b620c4a1a7ebba6ccfe7de5419`;
 - deterministic RQ1 probe: atomic alert và old LWT đều từ baseline `0/30` lên
   hardened `30/30`; không dùng inferential CI cho repeat cùng fixture;
-- source regression suite cuối `257 passed`;
+- source regression suite cuối `258 passed`;
 - RQ2 artifact v5: 30 cặp seed, 30 message/run. `lan-baseline` có median
   scheduled observation `1,0`, p50/p95 schedule-to-API `235,0/305,525 ms`;
   `remote-app-emulated` có `0,833333` và `632,75/969,925 ms`;
