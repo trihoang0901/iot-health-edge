@@ -135,6 +135,7 @@ def valid_telemetry_v3_payload() -> dict[str, Any]:
 def app_settings(tmp_path: Path) -> Settings:
     return Settings(
         database_path=tmp_path / "test.db",
+        experiment_evidence_dir=tmp_path / "evidence" / "runs",
         mqtt_enabled=False,
         telegram_enabled=False,
         telegram_bot_token=None,

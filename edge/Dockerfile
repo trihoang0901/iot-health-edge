@@ -16,6 +16,7 @@ RUN groupadd --system edge \
 
 COPY pyproject.toml README.md ./
 COPY edge ./edge
+COPY simulator ./simulator
 
 RUN python -m pip install --no-cache-dir . \
     && mkdir -p /app/data \

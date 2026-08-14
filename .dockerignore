@@ -3,5 +3,9 @@
 !README.md
 !edge/
 !edge/**
+!simulator/
+!simulator/**
 edge/__pycache__/
 edge/**/*.pyc
+simulator/__pycache__/
+simulator/**/*.pyc

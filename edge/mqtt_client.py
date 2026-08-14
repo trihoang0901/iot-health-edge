@@ -130,5 +130,13 @@ class EdgeMqttClient:
         self.subscribed.set()
 
     def _on_message(self, client: mqtt.Client, userdata: Any, message: mqtt.MQTTMessage) -> None:
-        if not self.ingestion.submit(message.topic, bytes(message.payload), utc_now()):
+        payload = bytes(message.payload)
+        if not self.ingestion.submit(
+            message.topic,
+            payload,
+            utc_now(),
+            qos=int(message.qos),
+            retain=bool(message.retain),
+            dup=bool(message.dup),
+        ):
             LOGGER.warning("MQTT payload dropped because ingestion queue is full")

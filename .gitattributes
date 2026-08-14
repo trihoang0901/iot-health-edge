@@ -1,0 +1,25 @@
+* text=auto eol=lf
+
+# Windows launchers are consumed directly by cmd.exe.
+*.bat text eol=crlf
+*.cmd text eol=crlf
+
+# Archives, documents, images, fonts, and compiled artifacts are binary.
+*.zip binary !eol
+*.docx binary !eol
+*.pdf binary !eol
+*.png binary !eol
+*.jpg binary !eol
+*.jpeg binary !eol
+*.gif binary !eol
+*.ico binary !eol
+*.woff binary !eol
+*.woff2 binary !eol
+*.ttf binary !eol
+*.otf binary !eol
+*.bin binary !eol
+*.elf binary !eol
+*.hex binary !eol
+*.db binary !eol
+*.sqlite binary !eol
+*.sqlite3 binary !eol

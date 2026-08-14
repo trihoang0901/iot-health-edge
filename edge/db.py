@@ -7,12 +7,20 @@ import uuid
 from contextlib import contextmanager
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any, Iterator
+from typing import Any, Iterator, Literal
 
 from .schemas import DeviceStatus, Telemetry, TelemetryMessage, TelemetryV2, TelemetryV3
 
 
 ACTIVE_STATES = ("open", "acknowledged")
+SessionDisposition = Literal["accepted", "duplicate", "out_of_order", "stale"]
+_STREAM_SEQUENCE_COLUMNS = {
+    "telemetry": "last_telemetry_seq",
+    "event": "last_event_seq",
+    "status": "last_status_seq",
+}
+_LWT_REASONS = {"mqtt_lost", "connection_lost"}
+_CONNECTION_START_REASONS = {"connected", "simulator_started"}
 
 
 class AlertAlreadyResolvedError(RuntimeError):
@@ -55,6 +63,38 @@ class Database:
             yield connection
         finally:
             connection.close()
+
+    @contextmanager
+    def transaction(self) -> Iterator[sqlite3.Connection]:
+        """Own one serialized SQLite transaction for a complete ingestion unit."""
+        with self._write_lock, self.connection() as connection:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                yield connection
+                connection.commit()
+            except BaseException:
+                connection.rollback()
+                raise
+
+    @contextmanager
+    def _write_scope(
+        self, connection: sqlite3.Connection | None
+    ) -> Iterator[sqlite3.Connection]:
+        if connection is not None:
+            yield connection
+            return
+        with self.transaction() as owned_connection:
+            yield owned_connection
+
+    @contextmanager
+    def _read_scope(
+        self, connection: sqlite3.Connection | None
+    ) -> Iterator[sqlite3.Connection]:
+        if connection is not None:
+            yield connection
+            return
+        with self.connection() as owned_connection:
+            yield owned_connection
 
     def initialize(self) -> None:
         self.path.parent.mkdir(parents=True, exist_ok=True)
@@ -153,9 +193,28 @@ class Database:
                     source_event_id TEXT,
                     UNIQUE(source_device_id, source_event_id)
                 );
+
+                CREATE TABLE IF NOT EXISTS device_sessions (
+                    device_id TEXT NOT NULL REFERENCES devices(device_id) ON DELETE CASCADE,
+                    boot_id TEXT NOT NULL,
+                    first_seen_at TEXT NOT NULL,
+                    last_seen_at TEXT NOT NULL,
+                    superseded_at TEXT,
+                    last_telemetry_seq INTEGER,
+                    last_event_seq INTEGER,
+                    last_status_seq INTEGER,
+                    connection_epoch INTEGER NOT NULL DEFAULT 0,
+                    expected_lwt_seq INTEGER,
+                    PRIMARY KEY(device_id, boot_id)
+                );
+
+                CREATE INDEX IF NOT EXISTS device_sessions_current
+                    ON device_sessions(device_id, superseded_at);
                 """
             )
             self._migrate_telemetry_columns(connection)
+            self._migrate_device_session_columns(connection)
+            self._backfill_device_sessions(connection)
             self._migrate_legacy_alert_history(connection)
             self._resolve_retired_surface_alerts(connection)
             connection.commit()
@@ -183,6 +242,151 @@ class Database:
                 connection.execute(
                     f"ALTER TABLE telemetry ADD COLUMN {name} {declaration}"  # noqa: S608
                 )
+
+    @staticmethod
+    def _migrate_device_session_columns(connection: sqlite3.Connection) -> None:
+        columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(device_sessions)").fetchall()
+        }
+        additions = {
+            "connection_epoch": "INTEGER NOT NULL DEFAULT 0",
+            "expected_lwt_seq": "INTEGER",
+        }
+        for name, declaration in additions.items():
+            if name not in columns:
+                connection.execute(
+                    f"ALTER TABLE device_sessions ADD COLUMN {name} {declaration}"  # noqa: S608
+                )
+
+    @staticmethod
+    def _backfill_device_sessions(connection: sqlite3.Connection) -> None:
+        """Conservatively reconstruct every telemetry-backed device session.
+
+        ``devices.boot_id`` remains the authority for the one current boot.  All
+        other boots retained in telemetry are materialized as superseded before
+        ingestion resumes, so replaying an old stored row cannot promote that
+        boot.  Existing status/event watermarks and connection epochs are never
+        lowered because telemetry is the only historical stream recoverable
+        from a pre-session database.
+        """
+        telemetry_rows = connection.execute(
+            """
+            SELECT
+                telemetry.device_id,
+                telemetry.boot_id,
+                MIN(telemetry.received_at) AS first_seen_at,
+                MAX(telemetry.received_at) AS last_seen_at,
+                MAX(telemetry.seq) AS max_telemetry_seq,
+                devices.boot_id AS current_boot_id,
+                devices.last_seen_at AS device_last_seen_at,
+                devices.updated_at AS device_updated_at
+            FROM telemetry
+            JOIN devices ON devices.device_id = telemetry.device_id
+            GROUP BY telemetry.device_id, telemetry.boot_id
+            """
+        ).fetchall()
+        for row in telemetry_rows:
+            is_current = row["boot_id"] == row["current_boot_id"]
+            first_seen_at = row["first_seen_at"]
+            last_seen_at = row["last_seen_at"]
+            superseded_at = None if is_current else (
+                row["device_updated_at"] or row["device_last_seen_at"] or last_seen_at
+            )
+            existing = connection.execute(
+                """
+                SELECT first_seen_at, last_seen_at, superseded_at,
+                       last_telemetry_seq, last_event_seq, last_status_seq,
+                       connection_epoch, expected_lwt_seq
+                FROM device_sessions
+                WHERE device_id = ? AND boot_id = ?
+                """,
+                (row["device_id"], row["boot_id"]),
+            ).fetchone()
+            if existing is None:
+                connection.execute(
+                    """
+                    INSERT INTO device_sessions (
+                        device_id, boot_id, first_seen_at, last_seen_at,
+                        superseded_at, last_telemetry_seq
+                    ) VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        row["device_id"],
+                        row["boot_id"],
+                        first_seen_at,
+                        last_seen_at,
+                        superseded_at,
+                        row["max_telemetry_seq"],
+                    ),
+                )
+            else:
+                merged_first_seen_at = min(existing["first_seen_at"], first_seen_at)
+                merged_last_seen_at = max(existing["last_seen_at"], last_seen_at)
+                merged_telemetry_seq = row["max_telemetry_seq"]
+                if existing["last_telemetry_seq"] is not None:
+                    merged_telemetry_seq = max(
+                        existing["last_telemetry_seq"], merged_telemetry_seq
+                    )
+                connection.execute(
+                    """
+                    UPDATE device_sessions
+                    SET first_seen_at = ?, last_seen_at = ?,
+                        superseded_at = ?, last_telemetry_seq = ?
+                    WHERE device_id = ? AND boot_id = ?
+                    """,
+                    (
+                        merged_first_seen_at,
+                        merged_last_seen_at,
+                        None if is_current else (existing["superseded_at"] or superseded_at),
+                        merged_telemetry_seq,
+                        row["device_id"],
+                        row["boot_id"],
+                    ),
+                )
+
+        # A current device may have no retained telemetry (for example, a status-
+        # only node).  Preserve/create its active session without inventing any
+        # unrecoverable stream watermark.
+        current_rows = connection.execute(
+            """
+            SELECT device_id, boot_id, last_seen_at, updated_at
+            FROM devices
+            WHERE boot_id IS NOT NULL
+            """
+        ).fetchall()
+        for row in current_rows:
+            seen_at = row["last_seen_at"] or row["updated_at"]
+            connection.execute(
+                """
+                INSERT OR IGNORE INTO device_sessions (
+                    device_id, boot_id, first_seen_at, last_seen_at
+                ) VALUES (?, ?, ?, ?)
+                """,
+                (row["device_id"], row["boot_id"], seen_at, seen_at),
+            )
+
+        connection.execute(
+            """
+            UPDATE device_sessions
+            SET superseded_at = CASE
+                WHEN boot_id = (
+                    SELECT devices.boot_id FROM devices
+                    WHERE devices.device_id = device_sessions.device_id
+                ) THEN NULL
+                ELSE COALESCE(
+                    superseded_at,
+                    (SELECT devices.updated_at FROM devices
+                     WHERE devices.device_id = device_sessions.device_id),
+                    last_seen_at
+                )
+            END
+            WHERE EXISTS (
+                SELECT 1 FROM devices
+                WHERE devices.device_id = device_sessions.device_id
+            )
+            """
+        )
 
     @staticmethod
     def _resolve_retired_surface_alerts(connection: sqlite3.Connection) -> None:
@@ -265,6 +469,223 @@ class Database:
             """
         )
 
+    def admit_session(
+        self,
+        *,
+        device_id: str,
+        boot_id: str,
+        stream: Literal["telemetry", "event", "status"],
+        seq: int,
+        received: datetime,
+        online: bool | None = None,
+        reason: str | None = None,
+        connection: sqlite3.Connection | None = None,
+    ) -> SessionDisposition:
+        """Classify a message before it is allowed to mutate current device state."""
+        sequence_column = _STREAM_SEQUENCE_COLUMNS[stream]
+        received_at = isoformat_utc(received)
+        with self._write_scope(connection) as active_connection:
+            device = active_connection.execute(
+                """
+                SELECT boot_id, online, last_seen_at, last_status_at,
+                       status_reason, updated_at
+                FROM devices WHERE device_id = ?
+                """,
+                (device_id,),
+            ).fetchone()
+            current_boot_id = None if device is None else device["boot_id"]
+            session = active_connection.execute(
+                """
+                SELECT * FROM device_sessions
+                WHERE device_id = ? AND boot_id = ?
+                """,
+                (device_id, boot_id),
+            ).fetchone()
+
+            if session is not None and session["superseded_at"] is not None:
+                return "stale"
+
+            if current_boot_id == boot_id:
+                if session is None:
+                    first_seen_at = (
+                        device["last_seen_at"] or device["updated_at"] or received_at
+                    )
+                    active_connection.execute(
+                        """
+                        INSERT INTO device_sessions (
+                            device_id, boot_id, first_seen_at, last_seen_at
+                        ) VALUES (?, ?, ?, ?)
+                        """,
+                        (device_id, boot_id, first_seen_at, received_at),
+                    )
+                    session = active_connection.execute(
+                        """
+                        SELECT * FROM device_sessions
+                        WHERE device_id = ? AND boot_id = ?
+                        """,
+                        (device_id, boot_id),
+                    ).fetchone()
+
+                if (
+                    stream == "status"
+                    and online is False
+                    and reason in _LWT_REASONS
+                ):
+                    expected_lwt_seq = session["expected_lwt_seq"]
+                    if expected_lwt_seq is not None and seq != expected_lwt_seq:
+                        return "out_of_order"
+                    if (
+                        not bool(device["online"])
+                        and device["status_reason"] in _LWT_REASONS
+                    ):
+                        return "duplicate"
+                    active_connection.execute(
+                        """
+                        UPDATE device_sessions
+                        SET expected_lwt_seq = COALESCE(expected_lwt_seq, ?),
+                            last_seen_at = ?
+                        WHERE device_id = ? AND boot_id = ?
+                        """,
+                        (seq, received_at, device_id, boot_id),
+                    )
+                    return "accepted"
+
+                previous_seq = session[sequence_column]
+
+                # A migrated database cannot recover historical status sequence.
+                # Do not let the first unanchored non-LWT offline status rewind an
+                # existing online state; an online status safely establishes the
+                # stream watermark, while events remain idempotent by event_id.
+                if (
+                    stream == "status"
+                    and previous_seq is None
+                    and device["last_status_at"] is not None
+                    and online is False
+                ):
+                    if (
+                        not bool(device["online"])
+                        and device["status_reason"] == reason
+                    ):
+                        return "duplicate"
+                    return "out_of_order"
+
+                if previous_seq is not None:
+                    if seq == previous_seq:
+                        return "duplicate"
+                    if seq < previous_seq:
+                        return "out_of_order"
+                if (
+                    stream == "status"
+                    and online is True
+                    and reason in _CONNECTION_START_REASONS
+                ):
+                    expected_lwt_seq = seq if reason == "simulator_started" else max(seq - 1, 0)
+                    active_connection.execute(
+                        f"""
+                        UPDATE device_sessions
+                        SET {sequence_column} = ?, last_seen_at = ?,
+                            connection_epoch = connection_epoch + 1,
+                            expected_lwt_seq = ?
+                        WHERE device_id = ? AND boot_id = ?
+                        """,  # noqa: S608 -- column is selected from a fixed internal mapping.
+                        (
+                            seq,
+                            received_at,
+                            expected_lwt_seq,
+                            device_id,
+                            boot_id,
+                        ),
+                    )
+                else:
+                    active_connection.execute(
+                        f"""
+                        UPDATE device_sessions
+                        SET {sequence_column} = ?, last_seen_at = ?
+                        WHERE device_id = ? AND boot_id = ?
+                        """,  # noqa: S608 -- column is selected from a fixed internal mapping.
+                        (seq, received_at, device_id, boot_id),
+                    )
+                return "accepted"
+
+            # A known non-current boot is never allowed to become current again.
+            if session is not None:
+                return "stale"
+
+            # A retained/offline Last Will cannot prove that an unknown boot is current.
+            if stream == "status" and online is False:
+                return "stale"
+
+            if current_boot_id:
+                legacy_seen_at = (
+                    device["last_seen_at"] or device["updated_at"] or received_at
+                )
+                active_connection.execute(
+                    """
+                    INSERT OR IGNORE INTO device_sessions (
+                        device_id, boot_id, first_seen_at, last_seen_at
+                    ) VALUES (?, ?, ?, ?)
+                    """,
+                    (device_id, current_boot_id, legacy_seen_at, legacy_seen_at),
+                )
+                active_connection.execute(
+                    """
+                    UPDATE device_sessions
+                    SET superseded_at = COALESCE(superseded_at, ?)
+                    WHERE device_id = ? AND superseded_at IS NULL
+                    """,
+                    (received_at, device_id),
+                )
+
+            # Create a minimal parent row so the session FK and the following payload
+            # mutation can live in the same transaction.
+            active_connection.execute(
+                """
+                INSERT INTO devices (device_id, boot_id, online, updated_at)
+                VALUES (?, ?, 0, ?)
+                ON CONFLICT(device_id) DO UPDATE SET
+                    boot_id = excluded.boot_id,
+                    updated_at = excluded.updated_at
+                """,
+                (device_id, boot_id, received_at),
+            )
+            sequence_values = {
+                "last_telemetry_seq": None,
+                "last_event_seq": None,
+                "last_status_seq": None,
+            }
+            sequence_values[sequence_column] = seq
+            is_connection_start = (
+                stream == "status"
+                and online is True
+                and reason in _CONNECTION_START_REASONS
+            )
+            expected_lwt_seq = None
+            if is_connection_start:
+                expected_lwt_seq = (
+                    seq if reason == "simulator_started" else max(seq - 1, 0)
+                )
+            active_connection.execute(
+                """
+                INSERT INTO device_sessions (
+                    device_id, boot_id, first_seen_at, last_seen_at,
+                    last_telemetry_seq, last_event_seq, last_status_seq,
+                    connection_epoch, expected_lwt_seq
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                """,
+                (
+                    device_id,
+                    boot_id,
+                    received_at,
+                    received_at,
+                    sequence_values["last_telemetry_seq"],
+                    sequence_values["last_event_seq"],
+                    sequence_values["last_status_seq"],
+                    1 if is_connection_start else 0,
+                    expected_lwt_seq,
+                ),
+            )
+            return "accepted"
+
     def is_healthy(self) -> bool:
         try:
             with self.connection() as connection:
@@ -305,7 +726,11 @@ class Database:
         )
 
     def insert_telemetry(
-        self, telemetry: TelemetryMessage, received: datetime, raw_json: str
+        self,
+        telemetry: TelemetryMessage,
+        received: datetime,
+        raw_json: str,
+        connection: sqlite3.Connection | None = None,
     ) -> tuple[int | None, bool]:
         received_at = isoformat_utc(received)
         if isinstance(telemetry, Telemetry):
@@ -337,8 +762,8 @@ class Database:
             wrist_surface_temp_valid = telemetry.quality.wrist_surface_temp_valid
         else:
             raise TypeError("unsupported telemetry model")
-        with self._write_lock, self.connection() as connection:
-            duplicate = connection.execute(
+        with self._write_scope(connection) as active_connection:
+            duplicate = active_connection.execute(
                 """
                 SELECT id FROM telemetry
                 WHERE device_id = ? AND boot_id = ? AND seq = ?
@@ -348,8 +773,8 @@ class Database:
             if duplicate is not None:
                 return None, False
 
-            self._upsert_device_from_telemetry(connection, telemetry, received_at)
-            cursor = connection.execute(
+            self._upsert_device_from_telemetry(active_connection, telemetry, received_at)
+            cursor = active_connection.execute(
                 """
                 INSERT INTO telemetry (
                     device_id, boot_id, seq, uptime_ms, received_at, schema_version,
@@ -398,7 +823,7 @@ class Database:
                     raw_json,
                 ),
             )
-            connection.execute(
+            active_connection.execute(
                 """
                 DELETE FROM telemetry
                 WHERE device_id = ? AND id <= COALESCE(
@@ -417,13 +842,17 @@ class Database:
                     self.telemetry_retention_rows,
                 ),
             )
-            connection.commit()
             return cursor.lastrowid, True
 
-    def update_status(self, status: DeviceStatus, received: datetime) -> None:
+    def update_status(
+        self,
+        status: DeviceStatus,
+        received: datetime,
+        connection: sqlite3.Connection | None = None,
+    ) -> None:
         received_at = isoformat_utc(received)
-        with self._write_lock, self.connection() as connection:
-            connection.execute(
+        with self._write_scope(connection) as active_connection:
+            active_connection.execute(
                 """
                 INSERT INTO devices (
                     device_id, boot_id, online, last_seen_at, last_status_at,
@@ -458,14 +887,17 @@ class Database:
                     received_at,
                 ),
             )
-            connection.commit()
 
     def ensure_device(
-        self, device_id: str, boot_id: str, received: datetime
+        self,
+        device_id: str,
+        boot_id: str,
+        received: datetime,
+        connection: sqlite3.Connection | None = None,
     ) -> None:
         received_at = isoformat_utc(received)
-        with self._write_lock, self.connection() as connection:
-            connection.execute(
+        with self._write_scope(connection) as active_connection:
+            active_connection.execute(
                 """
                 INSERT INTO devices (device_id, boot_id, online, last_seen_at, updated_at)
                 VALUES (?, ?, 1, ?, ?)
@@ -477,7 +909,6 @@ class Database:
                 """,
                 (device_id, boot_id, received_at, received_at),
             )
-            connection.commit()
 
     def open_or_touch_alert(
         self,
@@ -488,10 +919,11 @@ class Database:
         message: str,
         happened: datetime,
         value: float | None = None,
+        connection: sqlite3.Connection | None = None,
     ) -> dict[str, Any]:
         happened_at = isoformat_utc(happened)
-        with self._write_lock, self.connection() as connection:
-            active = connection.execute(
+        with self._write_scope(connection) as active_connection:
+            active = active_connection.execute(
                 """
                 SELECT * FROM alerts
                 WHERE device_id = ? AND rule_id = ?
@@ -500,7 +932,7 @@ class Database:
                 (device_id, rule_id),
             ).fetchone()
             if active:
-                connection.execute(
+                active_connection.execute(
                     """
                     UPDATE alerts
                     SET last_seen_at = ?, occurrence_count = occurrence_count + 1,
@@ -512,7 +944,7 @@ class Database:
                 alert_id = active["id"]
             else:
                 alert_id = str(uuid.uuid4())
-                connection.execute(
+                active_connection.execute(
                     """
                     INSERT INTO alerts (
                         id, device_id, rule_id, severity, state, message,
@@ -530,15 +962,16 @@ class Database:
                         value,
                     ),
                 )
-                connection.execute(
+                active_connection.execute(
                     """
                     INSERT INTO alert_history (alert_id, action, happened_at)
                     VALUES (?, 'opened', ?)
                     """,
                     (alert_id, happened_at),
                 )
-            connection.commit()
-            row = connection.execute("SELECT * FROM alerts WHERE id = ?", (alert_id,)).fetchone()
+            row = active_connection.execute(
+                "SELECT * FROM alerts WHERE id = ?", (alert_id,)
+            ).fetchone()
             return self._alert_dict(row)
 
     def record_fall_event(
@@ -547,10 +980,11 @@ class Database:
         device_id: str,
         event_id: str,
         happened: datetime,
+        connection: sqlite3.Connection | None = None,
     ) -> tuple[dict[str, Any], bool]:
         happened_at = isoformat_utc(happened)
-        with self._write_lock, self.connection() as connection:
-            duplicate = connection.execute(
+        with self._write_scope(connection) as active_connection:
+            duplicate = active_connection.execute(
                 """
                 SELECT alert_id FROM alert_history
                 WHERE source_device_id = ? AND source_event_id = ?
@@ -558,12 +992,12 @@ class Database:
                 (device_id, event_id),
             ).fetchone()
             if duplicate:
-                row = connection.execute(
+                row = active_connection.execute(
                     "SELECT * FROM alerts WHERE id = ?", (duplicate["alert_id"],)
                 ).fetchone()
                 return self._alert_dict(row), False
 
-            active = connection.execute(
+            active = active_connection.execute(
                 """
                 SELECT * FROM alerts
                 WHERE device_id = ? AND rule_id = 'fall_suspected_demo'
@@ -573,7 +1007,7 @@ class Database:
             ).fetchone()
             if active:
                 alert_id = active["id"]
-                connection.execute(
+                active_connection.execute(
                     """
                     UPDATE alerts
                     SET state = 'open', last_seen_at = ?,
@@ -587,7 +1021,7 @@ class Database:
                 action = "event_repeated"
             else:
                 alert_id = str(uuid.uuid4())
-                connection.execute(
+                active_connection.execute(
                     """
                     INSERT INTO alerts (
                         id, device_id, rule_id, severity, state, message,
@@ -603,7 +1037,7 @@ class Database:
                     ),
                 )
                 action = "opened"
-            connection.execute(
+            active_connection.execute(
                 """
                 INSERT INTO alert_history (
                     alert_id, action, happened_at, source_device_id, source_event_id
@@ -611,14 +1045,21 @@ class Database:
                 """,
                 (alert_id, action, happened_at, device_id, event_id),
             )
-            connection.commit()
-            row = connection.execute("SELECT * FROM alerts WHERE id = ?", (alert_id,)).fetchone()
+            row = active_connection.execute(
+                "SELECT * FROM alerts WHERE id = ?", (alert_id,)
+            ).fetchone()
             return self._alert_dict(row), True
 
-    def resolve_alert(self, device_id: str, rule_id: str, happened: datetime) -> bool:
+    def resolve_alert(
+        self,
+        device_id: str,
+        rule_id: str,
+        happened: datetime,
+        connection: sqlite3.Connection | None = None,
+    ) -> bool:
         happened_at = isoformat_utc(happened)
-        with self._write_lock, self.connection() as connection:
-            active = connection.execute(
+        with self._write_scope(connection) as active_connection:
+            active = active_connection.execute(
                 """
                 SELECT id FROM alerts
                 WHERE device_id = ? AND rule_id = ?
@@ -628,7 +1069,7 @@ class Database:
             ).fetchone()
             if not active:
                 return False
-            connection.execute(
+            active_connection.execute(
                 """
                 UPDATE alerts
                 SET state = 'resolved', resolved_at = ?, last_seen_at = ?
@@ -636,14 +1077,13 @@ class Database:
                 """,
                 (happened_at, happened_at, active["id"]),
             )
-            connection.execute(
+            active_connection.execute(
                 """
                 INSERT INTO alert_history (alert_id, action, happened_at)
                 VALUES (?, 'resolved', ?)
                 """,
                 (active["id"], happened_at),
             )
-            connection.commit()
             return True
 
     def acknowledge_alert(
@@ -684,9 +1124,14 @@ class Database:
             row = connection.execute("SELECT * FROM alerts WHERE id = ?", (alert_id,)).fetchone()
             return None if row is None else self._alert_dict(row)
 
-    def get_active_alert(self, device_id: str, rule_id: str) -> dict[str, Any] | None:
-        with self.connection() as connection:
-            row = connection.execute(
+    def get_active_alert(
+        self,
+        device_id: str,
+        rule_id: str,
+        connection: sqlite3.Connection | None = None,
+    ) -> dict[str, Any] | None:
+        with self._read_scope(connection) as active_connection:
+            row = active_connection.execute(
                 """
                 SELECT * FROM alerts
                 WHERE device_id = ? AND rule_id = ?
@@ -702,6 +1147,7 @@ class Database:
         state: str | None = None,
         device_id: str | None = None,
         limit: int = 100,
+        connection: sqlite3.Connection | None = None,
     ) -> list[dict[str, Any]]:
         clauses: list[str] = []
         parameters: list[Any] = []
@@ -715,8 +1161,8 @@ class Database:
             parameters.append(device_id)
         where = f" WHERE {' AND '.join(clauses)}" if clauses else ""
         parameters.append(limit)
-        with self.connection() as connection:
-            rows = connection.execute(
+        with self._read_scope(connection) as active_connection:
+            rows = active_connection.execute(
                 f"SELECT * FROM alerts{where} ORDER BY last_seen_at DESC LIMIT ?",  # noqa: S608
                 parameters,
             ).fetchall()
@@ -773,6 +1219,80 @@ class Database:
                 parameters,
             ).fetchall()
             return [self._telemetry_dict(row) for row in reversed(rows)]
+
+    def telemetry_history_window(
+        self,
+        device_id: str,
+        *,
+        from_time: str,
+        to_time: str,
+        limit: int = 1000,
+    ) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+        """Read a bounded chart slice and full-window coverage in one snapshot."""
+        if limit <= 0:
+            raise ValueError("limit must be greater than zero")
+        parameters = (device_id, from_time, to_time)
+        with self.connection() as connection:
+            connection.execute("BEGIN")
+            stats = connection.execute(
+                """
+                SELECT
+                    COUNT(*) AS total_available,
+                    MIN(received_at) AS coverage_from,
+                    MAX(received_at) AS coverage_to,
+                    COALESCE(SUM(
+                        CASE WHEN heart_rate_valid = 1
+                                   AND heart_rate_bpm IS NOT NULL
+                             THEN 1 ELSE 0 END
+                    ), 0) AS heart_rate_valid_count,
+                    COALESCE(SUM(
+                        CASE WHEN spo2_valid = 1 AND spo2_pct IS NOT NULL
+                             THEN 1 ELSE 0 END
+                    ), 0) AS spo2_valid_count,
+                    COALESCE(SUM(
+                        CASE WHEN wrist_surface_temp_valid = 1
+                                   AND wrist_surface_temp_c IS NOT NULL
+                             THEN 1 ELSE 0 END
+                    ), 0) AS wrist_surface_temp_valid_count
+                FROM telemetry
+                WHERE device_id = ? AND received_at >= ? AND received_at <= ?
+                """,
+                parameters,
+            ).fetchone()
+            rows = connection.execute(
+                """
+                SELECT * FROM telemetry
+                WHERE device_id = ? AND received_at >= ? AND received_at <= ?
+                ORDER BY received_at DESC, id DESC LIMIT ?
+                """,
+                (*parameters, limit),
+            ).fetchall()
+
+        total_available = int(stats["total_available"])
+        history = [self._telemetry_dict(row) for row in reversed(rows)]
+        validity = {
+            "heart_rate_bpm": {
+                "valid": int(stats["heart_rate_valid_count"]),
+                "total": total_available,
+            },
+            "spo2_pct": {
+                "valid": int(stats["spo2_valid_count"]),
+                "total": total_available,
+            },
+            "wrist_surface_temp_c": {
+                "valid": int(stats["wrist_surface_temp_valid_count"]),
+                "total": total_available,
+            },
+        }
+        return history, {
+            "coverage_from": stats["coverage_from"],
+            "coverage_to": stats["coverage_to"],
+            "total_available": total_available,
+            "returned": len(history),
+            "truncated": total_available > len(history),
+            "downsampling": "none",
+            "validity": validity,
+        }
 
     @staticmethod
     def _device_dict(row: sqlite3.Row) -> dict[str, Any]:

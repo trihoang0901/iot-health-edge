@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import sqlite3
 from dataclasses import asdict, dataclass
 from datetime import datetime
 from .config import DemoRuleSettings
@@ -23,6 +24,14 @@ class DemoRule:
         result = asdict(self)
         result["non_clinical"] = True
         return result
+
+
+@dataclass(frozen=True, slots=True)
+class RuleStateSnapshot:
+    pending_since: dict[tuple[str, str, str], datetime]
+    last_rule_sample: dict[tuple[str, str, str], datetime]
+    fall_recovery_since: dict[tuple[str, str], datetime]
+    fall_recovery_last_sample: dict[tuple[str, str], datetime]
 
 
 class RuleEngine:
@@ -53,10 +62,24 @@ class RuleEngine:
                 unit="bpm",
             ),
         )
-        self._pending_since: dict[tuple[str, str], datetime] = {}
-        self._last_rule_sample: dict[tuple[str, str], datetime] = {}
-        self._fall_recovery_since: dict[str, datetime] = {}
-        self._fall_recovery_last_sample: dict[str, datetime] = {}
+        self._pending_since: dict[tuple[str, str, str], datetime] = {}
+        self._last_rule_sample: dict[tuple[str, str, str], datetime] = {}
+        self._fall_recovery_since: dict[tuple[str, str], datetime] = {}
+        self._fall_recovery_last_sample: dict[tuple[str, str], datetime] = {}
+
+    def snapshot_state(self) -> RuleStateSnapshot:
+        return RuleStateSnapshot(
+            pending_since=dict(self._pending_since),
+            last_rule_sample=dict(self._last_rule_sample),
+            fall_recovery_since=dict(self._fall_recovery_since),
+            fall_recovery_last_sample=dict(self._fall_recovery_last_sample),
+        )
+
+    def restore_state(self, snapshot: RuleStateSnapshot) -> None:
+        self._pending_since = dict(snapshot.pending_since)
+        self._last_rule_sample = dict(snapshot.last_rule_sample)
+        self._fall_recovery_since = dict(snapshot.fall_recovery_since)
+        self._fall_recovery_last_sample = dict(snapshot.fall_recovery_last_sample)
 
     def public_rules(self) -> list[dict[str, object]]:
         rules = [
@@ -86,13 +109,18 @@ class RuleEngine:
         return rules
 
     def evaluate(
-        self, telemetry: TelemetryMessage, received: datetime
+        self,
+        telemetry: TelemetryMessage,
+        received: datetime,
+        connection: sqlite3.Connection | None = None,
     ) -> list[dict[str, object]]:
         changed: list[dict[str, object]] = []
         for rule in self.rules:
             value, is_valid = self._value_and_validity(telemetry, rule)
-            key = (telemetry.device_id, rule.rule_id)
-            active = self.database.get_active_alert(telemetry.device_id, rule.rule_id)
+            key = (telemetry.device_id, telemetry.boot_id, rule.rule_id)
+            active = self.database.get_active_alert(
+                telemetry.device_id, rule.rule_id, connection=connection
+            )
 
             if not is_valid or value is None:
                 self._pending_since.pop(key, None)
@@ -125,13 +153,20 @@ class RuleEngine:
                             message=rule.message,
                             happened=received,
                             value=value,
+                            connection=connection,
                         )
                     )
                 elif recovered and self.database.resolve_alert(
-                    telemetry.device_id, rule.rule_id, received
+                    telemetry.device_id,
+                    rule.rule_id,
+                    received,
+                    connection=connection,
                 ):
                     resolved = self.database.list_alerts(
-                        state="resolved", device_id=telemetry.device_id, limit=1
+                        state="resolved",
+                        device_id=telemetry.device_id,
+                        limit=1,
+                        connection=connection,
                     )
                     if resolved:
                         changed.append(resolved[0])
@@ -153,11 +188,12 @@ class RuleEngine:
                         message=rule.message,
                         happened=received,
                         value=value,
+                        connection=connection,
                     )
                 )
                 self._pending_since.pop(key, None)
 
-        changed.extend(self._evaluate_fall_state(telemetry, received))
+        changed.extend(self._evaluate_fall_state(telemetry, received, connection))
         return changed
 
     def _value_and_validity(
@@ -186,32 +222,48 @@ class RuleEngine:
         raise ValueError(f"unsupported demo rule field: {rule.field}")
 
     def _evaluate_fall_state(
-        self, telemetry: TelemetryMessage, received: datetime
+        self,
+        telemetry: TelemetryMessage,
+        received: datetime,
+        connection: sqlite3.Connection | None = None,
     ) -> list[dict[str, object]]:
         device_id = telemetry.device_id
-        active = self.database.get_active_alert(device_id, "fall_suspected_demo")
+        session_key = (device_id, telemetry.boot_id)
+        active = self.database.get_active_alert(
+            device_id, "fall_suspected_demo", connection=connection
+        )
         if not telemetry.quality.motion_valid:
-            self._fall_recovery_since.pop(device_id, None)
-            self._fall_recovery_last_sample.pop(device_id, None)
+            self._fall_recovery_since.pop(session_key, None)
+            self._fall_recovery_last_sample.pop(session_key, None)
             return []
         if not active or telemetry.motion.fall_state != "idle":
-            self._fall_recovery_since.pop(device_id, None)
-            self._fall_recovery_last_sample.pop(device_id, None)
+            self._fall_recovery_since.pop(session_key, None)
+            self._fall_recovery_last_sample.pop(session_key, None)
             return []
-        previous_sample = self._fall_recovery_last_sample.get(device_id)
+        previous_sample = self._fall_recovery_last_sample.get(session_key)
         if previous_sample is None or (
             (received - previous_sample).total_seconds() < 0
             or (received - previous_sample).total_seconds()
             > self.settings.max_sample_gap_seconds
         ):
-            self._fall_recovery_since[device_id] = received
-        self._fall_recovery_last_sample[device_id] = received
-        recovery_since = self._fall_recovery_since.setdefault(device_id, received)
+            self._fall_recovery_since[session_key] = received
+        self._fall_recovery_last_sample[session_key] = received
+        recovery_since = self._fall_recovery_since.setdefault(session_key, received)
         if (received - recovery_since).total_seconds() < self.settings.fall_recovery_seconds:
             return []
-        self._fall_recovery_since.pop(device_id, None)
-        self._fall_recovery_last_sample.pop(device_id, None)
-        if self.database.resolve_alert(device_id, "fall_suspected_demo", received):
-            resolved = self.database.list_alerts(state="resolved", device_id=device_id, limit=1)
+        self._fall_recovery_since.pop(session_key, None)
+        self._fall_recovery_last_sample.pop(session_key, None)
+        if self.database.resolve_alert(
+            device_id,
+            "fall_suspected_demo",
+            received,
+            connection=connection,
+        ):
+            resolved = self.database.list_alerts(
+                state="resolved",
+                device_id=device_id,
+                limit=1,
+                connection=connection,
+            )
             return resolved[:1]
         return []

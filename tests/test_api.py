@@ -3,13 +3,17 @@ from __future__ import annotations
 import json
 import time
 from dataclasses import replace
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from starlette.testclient import TestClient
 
+import simulator.experiment as experiment
 from edge.app import DASHBOARD_ASSET_VERSION, _stop_runtime_services, create_app
+from edge.db import isoformat_utc
+from edge.schemas import TelemetryV3
 from edge.service import InboundMessage
+from simulator.experiment import PollObservation, SOURCE_FILES, SOURCE_FINGERPRINT_SCOPE
 
 
 def ingest(client, kind, payload):
@@ -29,6 +33,8 @@ def test_health_and_static_dashboard(client):
     assert health.status_code == 200
     assert health.json()["status"] == "ok"
     assert health.json()["mqtt"]["enabled"] is False
+    assert "last_error" not in health.json()["mqtt"]
+    assert "last_error" not in health.json()["ingestion"]
     assert client.app.state.notifications is None
     assert "notifications" not in health.json()
     assert dashboard.status_code == 200
@@ -40,6 +46,127 @@ def test_health_and_static_dashboard(client):
     static_script = client.get(f"/static/app.js?v={DASHBOARD_ASSET_VERSION}")
     assert static_script.status_code == 200
     assert static_script.headers["cache-control"] == "no-store"
+
+
+def test_runtime_is_sanitized_and_capabilities_are_truthful(client):
+    client.app.state.ingestion._last_error = "password=secret C:\\private\\edge.db"
+
+    runtime = client.get("/api/v1/runtime")
+    capabilities = client.get("/api/v1/capabilities")
+
+    assert runtime.status_code == 200
+    assert runtime.json()["sanitized"] is True
+    assert "last_error" not in runtime.json()["ingestion"]
+    assert "secret" not in runtime.text
+    assert capabilities.status_code == 200
+    assert capabilities.json()["course_track"] == "IoT Protocol"
+    assert capabilities.json()["protocol"]["version"] == "3.1.1"
+    assert capabilities.json()["claims"]["measured_5g"] is False
+    assert capabilities.json()["claims"]["primary_latency_kind"] == (
+        "schedule_to_api_polling_upper_bound"
+    )
+    assert capabilities.json()["claims"]["diagnostic_latency_kind"] == (
+        "publish_to_api_polling_upper_bound"
+    )
+    assert "latency_kind" not in capabilities.json()["claims"]
+    assert all(
+        profile["network_claim"] == "none"
+        for profile in capabilities.json()["profiles"]
+    )
+
+
+def test_experiment_api_lists_only_reconciled_allowlisted_evidence(
+    client, monkeypatch
+):
+    class FakePublisher:
+        def __init__(self, _runtime, _stream):
+            self.is_connected = False
+
+        def connect(self):
+            self.is_connected = True
+
+        def publish(self, _message):
+            return None
+
+        def close(self):
+            self.is_connected = False
+
+    monkeypatch.setenv("SIMULATOR_MQTT_USERNAME", "simulator")
+    monkeypatch.setenv("SIMULATOR_MQTT_PASSWORD", "test-only")
+    monkeypatch.setattr(
+        experiment,
+        "source_provenance",
+        lambda: {
+            "scope": SOURCE_FINGERPRINT_SCOPE,
+            "head_commit": "a" * 40,
+            "source_state": "worktree_uncommitted",
+            "source_sha256": "b" * 64,
+            "source_files": list(SOURCE_FILES),
+        },
+    )
+    monkeypatch.setattr(experiment, "_require_api_ready", lambda _base: None)
+    monkeypatch.setattr(experiment, "MqttPublisher", FakePublisher)
+    monkeypatch.setattr(
+        experiment,
+        "_poll_observed",
+        lambda *_args, **_kwargs: PollObservation(True, None),
+    )
+    assert experiment.main(
+        [
+            "--count",
+            "20",
+            "--interval",
+            "0.001",
+            "--run-id",
+            "run-api-1",
+            "--output-dir",
+            str(client.app.state.settings.experiment_evidence_dir),
+        ]
+    ) == 0
+
+    listed = client.get("/api/v1/experiments")
+    detail = client.get("/api/v1/experiments/run-api-1")
+    escaped = client.get("/api/v1/experiments/%2E%2E%2Fescape")
+
+    assert listed.status_code == 200
+    assert listed.json()["total"] == 1
+    assert detail.status_code == 200
+    assert detail.json()["manifest"]["artifact_version"] == "5.0"
+    assert detail.json()["manifest"]["claims"]["primary_latency_kind"] == (
+        "schedule_to_api_polling_upper_bound"
+    )
+    assert detail.json()["summary"]["scheduled_observation_ratio"] == 1.0
+    assert "source_files" not in detail.text
+    assert escaped.status_code in {404, 422}
+
+
+def test_experiment_api_hides_well_typed_tampered_summary_and_raw(client, monkeypatch):
+    test_experiment_api_lists_only_reconciled_allowlisted_evidence(client, monkeypatch)
+    run_dir = client.app.state.settings.experiment_evidence_dir / "run-api-1"
+
+    summary_path = run_dir / "summary.json"
+    summary = json.loads(summary_path.read_text(encoding="utf-8"))
+    summary["scheduled_observation_ratio"] = 0.5
+    summary_path.write_text(json.dumps(summary), encoding="utf-8")
+    assert client.get("/api/v1/experiments/run-api-1").status_code == 404
+    assert client.get("/api/v1/experiments").json()["total"] == 0
+
+    # Restore the summary, then alter a numeric raw field without changing its
+    # JSON type.  Strict reconciliation must still hide the run.
+    summary["scheduled_observation_ratio"] = 1.0
+    summary_path.write_text(json.dumps(summary), encoding="utf-8")
+    samples_path = run_dir / "samples.jsonl"
+    samples = [
+        json.loads(line)
+        for line in samples_path.read_text(encoding="utf-8").splitlines()
+    ]
+    samples[0]["schedule_slip_ms"] += 10_000.0
+    samples_path.write_text(
+        "".join(json.dumps(item, separators=(",", ":")) + "\n" for item in samples),
+        encoding="utf-8",
+    )
+    assert client.get("/api/v1/experiments/run-api-1").status_code == 404
+    assert client.get("/api/v1/experiments").json()["total"] == 0
 
 
 def test_enabled_telegram_worker_follows_application_lifecycle(app_settings):
@@ -119,10 +246,16 @@ def test_worker_survives_unexpected_error_and_health_degrades(
     assert wait_until(lambda: ingestion.metrics()["accepted"] == 1)
 
     health = client.get("/healthz")
+    runtime = client.get("/api/v1/runtime")
     assert health.status_code == 200
+    assert runtime.status_code == 200
     assert health.json()["status"] == "degraded"
+    assert runtime.json()["edge"]["status"] == health.json()["status"]
+    assert runtime.json()["edge"]["database_healthy"] == health.json()["database"]["healthy"]
     assert health.json()["ingestion"]["worker_alive"] is True
     assert health.json()["ingestion"]["processing_errors"] == 1
+    assert runtime.json()["ingestion"]["worker_alive"] is True
+    assert runtime.json()["ingestion"]["processing_errors"] == 1
 
 
 def test_devices_latest_history_and_overview(client, valid_telemetry_payload):
@@ -141,6 +274,91 @@ def test_devices_latest_history_and_overview(client, valid_telemetry_payload):
     assert overview.json()["device"]["device_id"] == "health-node-01"
     assert overview.json()["non_clinical"] is True
     assert overview.json()["window_minutes"] == 15
+    assert overview.json()["history_meta"]["total_available"] == 1
+    assert overview.json()["history_meta"]["returned"] == 1
+    assert overview.json()["history_meta"]["truncated"] is False
+    assert overview.json()["history_meta"]["downsampling"] == "none"
+    assert overview.json()["history_meta"]["validity"] == {
+        "heart_rate_bpm": {"valid": 1, "total": 1},
+        "spo2_pct": {"valid": 1, "total": 1},
+        "wrist_surface_temp_c": {"valid": 0, "total": 1},
+    }
+
+
+def test_empty_overview_reports_explicit_zero_coverage_window(client):
+    body = client.get("/api/v1/overview?window=15m").json()
+    metadata = body["history_meta"]
+
+    assert body["history"] == []
+    assert metadata["coverage_from"] is None
+    assert metadata["coverage_to"] is None
+    assert metadata["total_available"] == metadata["returned"] == 0
+    assert metadata["truncated"] is False
+    assert metadata["downsampling"] == "none"
+    assert metadata["validity"] == {
+        "heart_rate_bpm": {"valid": 0, "total": 0},
+        "spo2_pct": {"valid": 0, "total": 0},
+        "wrist_surface_temp_c": {"valid": 0, "total": 0},
+    }
+    requested_from = datetime.fromisoformat(
+        metadata["requested_from"].replace("Z", "+00:00")
+    )
+    requested_to = datetime.fromisoformat(
+        metadata["requested_to"].replace("Z", "+00:00")
+    )
+    assert requested_to - requested_from == timedelta(minutes=15)
+
+
+def test_overview_discloses_last_1000_truncation_and_full_window_validity(
+    client, valid_telemetry_v3_payload
+):
+    database = client.app.state.database
+    end = datetime.now(UTC) - timedelta(seconds=1)
+    start = end - timedelta(seconds=100)
+    with database.transaction() as connection:
+        for seq in range(1, 1002):
+            payload = json.loads(json.dumps(valid_telemetry_v3_payload))
+            payload["seq"] = seq
+            payload["uptime_ms"] = seq * 100
+            if seq % 10 == 0:
+                payload["vitals"]["heart_rate_bpm"] = None
+                payload["quality"]["heart_rate_valid"] = False
+            if seq % 5 == 0:
+                payload["vitals"]["spo2_pct"] = None
+                payload["quality"]["spo2_valid"] = False
+            if seq % 4 == 0:
+                payload["wearable"]["wrist_surface_temp_c"] = None
+                payload["quality"]["wrist_surface_temp_valid"] = False
+                payload["system"]["faults"] = ["ds18b20_unavailable"]
+            received = start + timedelta(milliseconds=seq * 100)
+            database.insert_telemetry(
+                TelemetryV3.model_validate(payload),
+                received,
+                json.dumps(payload),
+                connection=connection,
+            )
+
+    body = client.get(
+        "/api/v1/overview?device_id=health-node-01&window=15m"
+    ).json()
+    metadata = body["history_meta"]
+
+    assert len(body["history"]) == 1000
+    assert metadata["total_available"] == 1001
+    assert metadata["returned"] == 1000
+    assert metadata["truncated"] is True
+    assert metadata["downsampling"] == "none"
+    assert metadata["coverage_from"] == isoformat_utc(
+        start + timedelta(milliseconds=100)
+    )
+    assert metadata["coverage_to"] == isoformat_utc(
+        start + timedelta(milliseconds=100100)
+    )
+    assert metadata["validity"] == {
+        "heart_rate_bpm": {"valid": 901, "total": 1001},
+        "spo2_pct": {"valid": 801, "total": 1001},
+        "wrist_surface_temp_c": {"valid": 751, "total": 1001},
+    }
 
 
 def test_existing_api_routes_expose_normalized_v2_environment(

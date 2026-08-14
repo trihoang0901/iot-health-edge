@@ -1,0 +1,9 @@
+{
+  "name": "iot-health-edge-artifact-qa",
+  "private": true,
+  "version": "1.0.0",
+  "description": "Pinned browser QA dependency for the NT532 MQTT MVP artifacts.",
+  "devDependencies": {
+    "playwright": "1.62.1"
+  }
+}

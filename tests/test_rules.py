@@ -111,6 +111,31 @@ def test_rule_hold_resets_after_sample_gap(tmp_path, valid_telemetry_payload):
     assert alerts[0]["first_seen_at"].endswith("12:00:09.000Z")
 
 
+def test_new_boot_does_not_inherit_pending_hold_from_old_boot(
+    tmp_path, valid_telemetry_payload
+):
+    database, engine = build_engine(
+        tmp_path, hold=2.0, max_sample_gap=10.0
+    )
+    start = datetime(2026, 8, 4, 12, 0, tzinfo=UTC)
+    database.ensure_device("health-node-01", "boot-a", start)
+    boot_a_payload = {**valid_telemetry_payload, "boot_id": "boot-a"}
+    boot_b_payload = {**valid_telemetry_payload, "boot_id": "boot-b"}
+    boot_a = telemetry_from(boot_a_payload, spo2_pct=90.0)
+    boot_b = telemetry_from(boot_b_payload, spo2_pct=90.0)
+
+    engine.evaluate(boot_a, start)
+    database.ensure_device(
+        "health-node-01", "boot-b", start + timedelta(seconds=1)
+    )
+    engine.evaluate(boot_b, start + timedelta(seconds=2))
+
+    assert database.list_alerts(state="active") == []
+
+    engine.evaluate(boot_b, start + timedelta(seconds=4))
+    assert len(database.list_alerts(state="active")) == 1
+
+
 def test_hysteresis_prevents_alert_flapping(tmp_path, valid_telemetry_payload):
     database, engine = build_engine(tmp_path, hold=0.0)
     now = datetime(2026, 8, 4, 12, 0, tzinfo=UTC)
