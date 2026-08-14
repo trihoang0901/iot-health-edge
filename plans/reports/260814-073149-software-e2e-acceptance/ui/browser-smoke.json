@@ -1,0 +1,128 @@
+{
+  "artifact_version": "1.1",
+  "generated_at": "2026-08-14T00:33:08.475Z",
+  "base_url": "http://127.0.0.1:8000",
+  "browser": "151.0.7922.110",
+  "served_asset_version": "0719c500352f",
+  "source_provenance": {
+    "scope": "dashboard_static_and_smoke_script",
+    "source_sha256": "ad606917fe23f33f373f536bd7741eed5b30979da8e44d3f7ff78b438f7747c9",
+    "source_files": [
+      "edge/static/app.js",
+      "edge/static/index.html",
+      "edge/static/styles.css",
+      "scripts/dashboard-browser-smoke.js"
+    ]
+  },
+  "status": "passed",
+  "checks": [
+    {
+      "name": "mobile-320",
+      "viewport": {
+        "width": 320,
+        "height": 900
+      },
+      "lang": "vi",
+      "title": "NT532 · Bàn điều khiển độ tin cậy MQTT",
+      "hasSkipLink": true,
+      "hasMain": true,
+      "hasH1": true,
+      "duplicateIds": [],
+      "unlabeledControls": [],
+      "horizontalOverflowPx": 0,
+      "interactiveCount": 9,
+      "statusLiveRegions": 2,
+      "focused": {
+        "tag": "a",
+        "text": "Bỏ qua đến nội dung chính",
+        "outlineStyle": "solid",
+        "outlineWidth": "3px"
+      },
+      "screenshot": "dashboard-mobile-320.png",
+      "screenshot_sha256": "f9db25eb3f0849091388a63d10f7b7998dc10a40361c5d73244780c331b1d1d4",
+      "served_asset_version": "0719c500352f"
+    },
+    {
+      "name": "mobile-360",
+      "viewport": {
+        "width": 360,
+        "height": 900
+      },
+      "lang": "vi",
+      "title": "NT532 · Bàn điều khiển độ tin cậy MQTT",
+      "hasSkipLink": true,
+      "hasMain": true,
+      "hasH1": true,
+      "duplicateIds": [],
+      "unlabeledControls": [],
+      "horizontalOverflowPx": 0,
+      "interactiveCount": 9,
+      "statusLiveRegions": 2,
+      "focused": {
+        "tag": "a",
+        "text": "Bỏ qua đến nội dung chính",
+        "outlineStyle": "solid",
+        "outlineWidth": "3px"
+      },
+      "screenshot": "dashboard-mobile-360.png",
+      "screenshot_sha256": "365f7890924a1b68d127cbd8ca3d5de42fad5867873e5bf4d82260dee3a52f6d",
+      "served_asset_version": "0719c500352f"
+    },
+    {
+      "name": "tablet-768",
+      "viewport": {
+        "width": 768,
+        "height": 1000
+      },
+      "lang": "vi",
+      "title": "NT532 · Bàn điều khiển độ tin cậy MQTT",
+      "hasSkipLink": true,
+      "hasMain": true,
+      "hasH1": true,
+      "duplicateIds": [],
+      "unlabeledControls": [],
+      "horizontalOverflowPx": 0,
+      "interactiveCount": 9,
+      "statusLiveRegions": 2,
+      "focused": {
+        "tag": "a",
+        "text": "Bỏ qua đến nội dung chính",
+        "outlineStyle": "solid",
+        "outlineWidth": "3px"
+      },
+      "screenshot": "dashboard-tablet-768.png",
+      "screenshot_sha256": "42119716b888462627d8cfdb6b25b2d5d7a5cd8c5f3811babd143dd3ccc331e0",
+      "served_asset_version": "0719c500352f"
+    },
+    {
+      "name": "desktop-1440",
+      "viewport": {
+        "width": 1440,
+        "height": 1000
+      },
+      "lang": "vi",
+      "title": "NT532 · Bàn điều khiển độ tin cậy MQTT",
+      "hasSkipLink": true,
+      "hasMain": true,
+      "hasH1": true,
+      "duplicateIds": [],
+      "unlabeledControls": [],
+      "horizontalOverflowPx": 0,
+      "interactiveCount": 9,
+      "statusLiveRegions": 2,
+      "focused": {
+        "tag": "a",
+        "text": "Bỏ qua đến nội dung chính",
+        "outlineStyle": "solid",
+        "outlineWidth": "3px"
+      },
+      "screenshot": "dashboard-desktop-1440.png",
+      "screenshot_sha256": "0ad114ba0949d34294886a92bf4d4e70de98a5f3e23ffd62f5c5cf385f5fab30",
+      "served_asset_version": "0719c500352f"
+    }
+  ],
+  "limitations": [
+    "Automated semantic and visual smoke; not a full WCAG conformance claim.",
+    "Manual screen-reader and 400% browser zoom remain separate human checks."
+  ]
+}

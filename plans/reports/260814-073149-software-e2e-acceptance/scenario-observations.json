@@ -1,0 +1,143 @@
+{
+  "artifact_version": "1.0",
+  "captured_at": "2026-08-14T00:55:02.158Z",
+  "capture_kind": "sanitized_api_observation_snapshot",
+  "queries": [
+    "GET /healthz",
+    "GET /api/v1/devices/health-node-01/telemetry?limit=1000 then filter the three recorded boot_id values",
+    "GET /api/v1/alerts/f2a68f03-7d72-42ec-8998-322db2d82ff2"
+  ],
+  "health": {
+    "status": "ok",
+    "database": {
+      "healthy": true
+    },
+    "mqtt": {
+      "enabled": true,
+      "connected": true,
+      "subscribed": true,
+      "has_error": false
+    },
+    "ingestion": {
+      "accepted": 71,
+      "duplicates": 1,
+      "stale": 0,
+      "out_of_order": 0,
+      "rejected": 0,
+      "queue_dropped": 0,
+      "processing_errors": 0,
+      "payload_bytes": 35924,
+      "qos0_messages": 63,
+      "qos1_messages": 9,
+      "retained_messages": 1,
+      "mqtt_dup_flagged": 0,
+      "queue_depth": 0,
+      "worker_alive": true,
+      "has_error": false
+    },
+    "non_clinical": true
+  },
+  "telemetry_runs": [
+    {
+      "scenario": "normal",
+      "boot_id": "53bef7bcf33f44f290781798783c4bf2",
+      "row_count": 20,
+      "seq_first": 1,
+      "seq_last": 20,
+      "received_first": "2026-08-14T00:30:26.651Z",
+      "received_last": "2026-08-14T00:30:45.730Z",
+      "latest": {
+        "schema": "health.telemetry.v3",
+        "device_id": "health-node-01",
+        "boot_id": "53bef7bcf33f44f290781798783c4bf2",
+        "seq": 20,
+        "vitals": {
+          "heart_rate_bpm": 72.5,
+          "spo2_pct": 98.1
+        },
+        "quality": {
+          "motion_artifact": false,
+          "heart_rate_valid": true,
+          "spo2_valid": true
+        },
+        "system": {
+          "fw": "simulator-1.2.0",
+          "faults": []
+        }
+      }
+    },
+    {
+      "scenario": "motion_artifact",
+      "boot_id": "8250e1cac5c94de9b074388a428defd3",
+      "row_count": 20,
+      "seq_first": 1,
+      "seq_last": 20,
+      "received_first": "2026-08-14T00:30:47.614Z",
+      "received_last": "2026-08-14T00:31:06.681Z",
+      "latest": {
+        "schema": "health.telemetry.v3",
+        "device_id": "health-node-01",
+        "boot_id": "8250e1cac5c94de9b074388a428defd3",
+        "seq": 20,
+        "vitals": {
+          "heart_rate_bpm": null,
+          "spo2_pct": null
+        },
+        "quality": {
+          "motion_artifact": true,
+          "heart_rate_valid": false,
+          "spo2_valid": false
+        },
+        "system": {
+          "fw": "simulator-1.2.0",
+          "faults": [
+            "ppg_motion_artifact"
+          ]
+        }
+      }
+    },
+    {
+      "scenario": "low_spo2",
+      "boot_id": "f0964d14ebeb4b5f8b8c4b430610aa9a",
+      "row_count": 20,
+      "seq_first": 1,
+      "seq_last": 20,
+      "received_first": "2026-08-14T00:31:08.562Z",
+      "received_last": "2026-08-14T00:31:27.616Z",
+      "latest": {
+        "schema": "health.telemetry.v3",
+        "device_id": "health-node-01",
+        "boot_id": "f0964d14ebeb4b5f8b8c4b430610aa9a",
+        "seq": 20,
+        "vitals": {
+          "heart_rate_bpm": 72.1,
+          "spo2_pct": 88.5
+        },
+        "quality": {
+          "motion_artifact": false,
+          "heart_rate_valid": true,
+          "spo2_valid": true
+        },
+        "system": {
+          "fw": "simulator-1.2.0",
+          "faults": []
+        }
+      }
+    }
+  ],
+  "alert": {
+    "id": "f2a68f03-7d72-42ec-8998-322db2d82ff2",
+    "device_id": "health-node-01",
+    "rule_id": "demo_low_spo2",
+    "severity": "warning",
+    "state": "acknowledged",
+    "first_seen_at": "2026-08-14T00:31:18.586Z",
+    "last_seen_at": "2026-08-14T00:31:27.616Z",
+    "occurrence_count": 10,
+    "last_value": 88.5,
+    "acknowledged_at": "2026-08-14T00:31:28.927Z",
+    "acknowledged_by": "Nhom 3 acceptance",
+    "acknowledgement_note": "Da xem trong nghiem thu phan mem; khong phai xu ly y te.",
+    "resolved_at": null
+  }
+}

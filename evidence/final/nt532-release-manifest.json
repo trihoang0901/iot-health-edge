@@ -1,0 +1,39 @@
+{
+  "artifact_version": "1.0",
+  "generated_at": "2026-08-14T02:15:02Z",
+  "status": "ready_for_submission_with_declared_limitations",
+  "scope": "nt532_software_mvp",
+  "artifacts": [
+    {
+      "kind": "report_docx",
+      "path": "deliverables/BAO-CAO-NT532-MQTT-MVP.docx",
+      "size": 465171,
+      "sha256": "a3831ed5b6272b6cc1f2ebe462d87618c1e010eb40a7dc71f5034a516e1f62ae"
+    },
+    {
+      "kind": "report_source",
+      "path": "deliverables/BAO-CAO-NT532-MQTT-MVP.md",
+      "size": 46948,
+      "sha256": "8c3eadd21c8f66d43c40915aea9b48068f43ce4a23b38246aba83676de8a43fa"
+    },
+    {
+      "kind": "research_evidence_zip",
+      "path": "evidence/final/nt532-mqtt-mvp-evidence-v5.zip",
+      "size": 1662002,
+      "sha256": "def22cfdfbaf36acdd651bec0639ecda83e9f4cc20ea8cb69c00cc28aa60093f"
+    },
+    {
+      "kind": "software_acceptance_zip",
+      "path": "evidence/final/nt532-software-e2e-acceptance.zip",
+      "size": 1306493,
+      "sha256": "da9c4a8d21ab40cd5e99c793973d77c775b570305d3f57d9ab6a57b780e7fe3a"
+    }
+  ],
+  "limitations": [
+    "physical_node_runtime_not_verified_in_final_software_batch",
+    "manual_screen_reader_and_400_percent_zoom_not_verified",
+    "app_impairment_is_not_network_or_5g_measurement",
+    "non_clinical_prototype",
+    "official_rubric_and_page_limit_not_provided"
+  ]
+}
