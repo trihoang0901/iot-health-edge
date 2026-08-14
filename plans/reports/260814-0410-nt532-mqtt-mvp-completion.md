@@ -22,7 +22,7 @@
 
 | Gate | Kết quả |
 |---|---|
-| Full pytest | 257 passed |
+| Full pytest | 258 passed |
 | RQ1 baseline -> hardened | 0/30 -> 30/30 ở cả hai counterexample |
 | RQ2 | 60/60 run completed, 30 matched seed/profile |
 | LAN median coverage; p50/p95 | 1,0; 235,0/305,525 ms |
@@ -48,9 +48,9 @@ và chỉ là KPI phụ. Đây là app impairment trước MQTT publish trên c�
 - Software acceptance bundle: `evidence/final/nt532-software-e2e-acceptance.zip`
 
 Research bundle SHA-256:
-`def22cfdfbaf36acdd651bec0639ecda83e9f4cc20ea8cb69c00cc28aa60093f`.
+`52aa1960e98209560a61fe9c835a98d47e46f95a5e8780bc365a6a993e083daa`.
 Software acceptance bundle SHA-256:
-`da9c4a8d21ab40cd5e99c793973d77c775b570305d3f57d9ab6a57b780e7fe3a`.
+`b6dc2e9016d97fecdb8394b653fc0dbee0eba2cd1073b099f3cf8dceff984542`.
 
 ## Giới hạn còn lại
 

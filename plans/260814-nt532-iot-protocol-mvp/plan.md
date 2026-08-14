@@ -240,7 +240,7 @@ bìa. Placeholder không được tính là hoàn thành thông tin hành chính
 Hoàn thành lúc `2026-08-14T04:15:56+07:00`, trước deadline. Phạm vi kỹ thuật của
 kế hoạch đạt các gate sau:
 
-- source regression cuối: `257 passed`; JavaScript syntax, Compose resolved config,
+- source regression cuối: `258 passed`; JavaScript syntax, Compose resolved config,
   Docker live health/capability và firmware `nodemcuv2` build-only đều pass;
 - RQ1 deterministic repeatability: baseline `0/30`, hardened `30/30` cho cả
   atomic alert sau crash/retry và old LWT không rewind session;
@@ -248,9 +248,9 @@ kế hoạch đạt các gate sau:
   reconciliation pass; evidence chính thức dùng prefix `nt532-rq2-v5-`;
 - browser smoke pass ở 320/360/768/1440 px và được ràng buộc với served asset;
 - research bundle chứa 189 file allowlist, SHA-256
-  `def22cfdfbaf36acdd651bec0639ecda83e9f4cc20ea8cb69c00cc28aa60093f`;
+  `52aa1960e98209560a61fe9c835a98d47e46f95a5e8780bc365a6a993e083daa`;
 - software acceptance bundle chứa đúng 14 payload allowlist, SHA-256
-  `da9c4a8d21ab40cd5e99c793973d77c775b570305d3f57d9ab6a57b780e7fe3a`;
+  `b6dc2e9016d97fecdb8394b653fc0dbee0eba2cd1073b099f3cf8dceff984542`;
 - báo cáo Word render đủ 32 trang; visual inspection từng trang và a11y audit tự động
   high/medium/low = `0/0/0`.
 

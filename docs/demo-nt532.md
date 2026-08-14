@@ -61,7 +61,7 @@ upload firmware:
 .\scripts\VERIFY-MVP.ps1 -IncludeDockerLive -IncludeFirmware
 ```
 
-Source regression suite cuối đạt `257 passed`. Final verification artifact `1.3`,
+Source regression suite cuối đạt `258 passed`. Final verification artifact `1.3`,
 browser artifact `1.1` và evidence bundle v5 đã được khóa bằng SHA-256 trong biên
 bản ở Mục 5; không tái dùng hash hoặc run v1-v4.
 
@@ -244,7 +244,7 @@ Kết thúc bằng ba câu rõ ràng:
 |---|---|---|
 | Provenance RQ1 | `VERIFIED_WITH_LIMITATION` | baseline commit `7030e4b30300dec65646e3091356ca00d9eaa8f5`, clean hash `760429f9dceed614279cb6c937d111a66fb1cb63ca813ed615c7de1bbd24c280`; artifact hardened sinh pre-commit với scoped hash `4bce098e63c53ab20bc7d9ab37162848504160b620c4a1a7ebba6ccfe7de5419`; source hiện ở `935c393e03a68465e538f624ff3405cd4560eb49` |
 | Provenance RQ2 v5 | `VERIFIED_WITH_LIMITATION` | artifact sinh với `worktree_uncommitted`; allowlisted source hash `f5e27d518f9a625397f289f90fd42bac9cf89d628c8e820a18ce55dfdacde280` khớp commit `935c393e03a68465e538f624ff3405cd4560eb49` |
-| Source regression | `VERIFIED` | `257 passed` |
+| Source regression | `VERIFIED` | `258 passed` |
 | Normal campaign | `VERIFIED` | artifact `5.0`, 30 matched seed/profile, 30 message/run; `evidence/analysis/rq2-v5-experiments.json`, SHA-256 `b2bb2e80edee83bd8a89531d079e4148ddb1442e7a9734cb2de353e4cddd4ffb` |
 | Normal simulator E2E | `VERIFIED` | acceptance 14/08/2026: schema v3, seq 20, quality hợp lệ, không có alert mới; exact command/seed và boot ID ở `plans/reports/260814-073149-software-e2e-acceptance/scenario-acceptance.json` |
 | Motion artifact tương tác | `VERIFIED` | HR/SpO2 null + invalid, fault `ppg_motion_artifact`, không có alert mới; snapshot API ở `scenario-observations.json` cùng thư mục |
@@ -254,11 +254,11 @@ Kết thúc bằng ba câu rõ ràng:
 | `remote-app-emulated` | `VERIFIED_WITH_BOUNDARY` | scheduled observation 0,833333 [0,8; 0,866667]; p50 632,75 ms [539,0; 710,75]; p95 969,925 ms [885,575; 1.101,75]; intentional drop 0,166667 [0,133333; 0,2]; attempted delivery phụ 1,0 |
 | Paired remote − LAN | `VERIFIED_WITH_BOUNDARY` | coverage -0,166667 [-0,2; -0,133333]; p50 +363,0 ms [+316,5; +472,25]; p95 +634,275 ms [+564,875; +760,025]; attempted delta 0 |
 | Measurement boundary | `VERIFIED` | same-process host monotonic, polling 100 ms, primary schedule-to-API, app impairment before publish, `network_claim=none`, `measured_5g=false` |
-| Final verification | `VERIFIED` | artifact `1.3`, `commit_clean` tại `935c393e03a68465e538f624ff3405cd4560eb49`; 257 test + JS + Compose + dry-run + Docker live + firmware build-only; SHA-256 `9e82fe7fa3848812eb18fc0491f01fc250ac71032beb4e94c8d61f55e8eb0c69` |
+| Final verification | `VERIFIED` | artifact `1.3`, `commit_clean` tại `ee0c2331e3aebdf8d08f6200c4f2b351d6f0893b`; 258 test + JS + Compose + dry-run + Docker live + firmware build-only; SHA-256 `826a42b26a8d407f13fc6f691cc7305d1d96c305cf9b5c5354e3d63c252d28e8` |
 | Browser smoke | `VERIFIED_WITH_LIMITATION` | artifact `1.1`, 320/360/768/1440 px; SHA-256 `e03c63d8849751fd57742839c0da802499f5eb757abaf55140b174012c210a02`; không phải WCAG conformance |
 | Manual screen reader/zoom 400% | `NOT_VERIFIED` | cần kiểm tra thủ công riêng |
-| Research bundle secret scan | `VERIFIED` | 189 file allowlist; aggregate reconcile + 185 text file redaction pass; ZIP SHA-256 `def22cfdfbaf36acdd651bec0639ecda83e9f4cc20ea8cb69c00cc28aa60093f` |
-| Software acceptance bundle | `VERIFIED` | 14 payload allowlist; 10 text file redaction/reconciliation pass; ZIP SHA-256 `da9c4a8d21ab40cd5e99c793973d77c775b570305d3f57d9ab6a57b780e7fe3a` |
+| Research bundle secret scan | `VERIFIED` | 189 file allowlist; aggregate reconcile + 185 text file redaction pass; ZIP SHA-256 `52aa1960e98209560a61fe9c835a98d47e46f95a5e8780bc365a6a993e083daa` |
+| Software acceptance bundle | `VERIFIED` | 14 payload allowlist; 10 text file redaction/reconciliation pass; ZIP SHA-256 `b6dc2e9016d97fecdb8394b653fc0dbee0eba2cd1073b099f3cf8dceff984542` |
 | Docker live | `VERIFIED` | health/capability boundary pass trong exact final invocation |
 | Firmware build-only | `VERIFIED_WITH_LIMITATION` | build pass; không upload, không suy ra runtime phần cứng |
 | Node vật lý | `NOT_VERIFIED` | tùy chọn; build thành công không chứng minh runtime phần cứng |

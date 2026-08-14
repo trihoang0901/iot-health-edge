@@ -1,32 +1,32 @@
 {
   "artifact_version": "1.0",
-  "generated_at": "2026-08-14T02:15:02Z",
+  "generated_at": "2026-08-14T02:25:58Z",
   "status": "ready_for_submission_with_declared_limitations",
   "scope": "nt532_software_mvp",
   "artifacts": [
     {
       "kind": "report_docx",
       "path": "deliverables/BAO-CAO-NT532-MQTT-MVP.docx",
-      "size": 465171,
-      "sha256": "a3831ed5b6272b6cc1f2ebe462d87618c1e010eb40a7dc71f5034a516e1f62ae"
+      "size": 465204,
+      "sha256": "41214392f4889d3f4beb64d2cbb4422c22ca860b23e5dc1f1715c1db2548439a"
     },
     {
       "kind": "report_source",
       "path": "deliverables/BAO-CAO-NT532-MQTT-MVP.md",
       "size": 46948,
-      "sha256": "8c3eadd21c8f66d43c40915aea9b48068f43ce4a23b38246aba83676de8a43fa"
+      "sha256": "d41ba54c778977b0d4e1358eeefa5c572bb000aedae5e3eaad1b5d33f87929ec"
     },
     {
       "kind": "research_evidence_zip",
       "path": "evidence/final/nt532-mqtt-mvp-evidence-v5.zip",
-      "size": 1662002,
-      "sha256": "def22cfdfbaf36acdd651bec0639ecda83e9f4cc20ea8cb69c00cc28aa60093f"
+      "size": 1661996,
+      "sha256": "52aa1960e98209560a61fe9c835a98d47e46f95a5e8780bc365a6a993e083daa"
     },
     {
       "kind": "software_acceptance_zip",
       "path": "evidence/final/nt532-software-e2e-acceptance.zip",
-      "size": 1306493,
-      "sha256": "da9c4a8d21ab40cd5e99c793973d77c775b570305d3f57d9ab6a57b780e7fe3a"
+      "size": 1306492,
+      "sha256": "b6dc2e9016d97fecdb8394b653fc0dbee0eba2cd1073b099f3cf8dceff984542"
     }
   ],
   "limitations": [

@@ -26,7 +26,7 @@
   },
   "verification": {
     "path": "evidence/analysis/verification-latest.json",
-    "sha256": "9e82fe7fa3848812eb18fc0491f01fc250ac71032beb4e94c8d61f55e8eb0c69",
+    "sha256": "826a42b26a8d407f13fc6f691cc7305d1d96c305cf9b5c5354e3d63c252d28e8",
     "artifact_version": "1.3",
     "overall_status": "passed"
   },

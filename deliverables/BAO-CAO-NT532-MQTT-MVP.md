@@ -100,7 +100,7 @@ live bằng đúng namespace ACL. Normal không tạo alert; motion artifact vô
 hóa HR/SpO2 và không tạo false alert; low SpO2 hợp lệ tạo đúng một logical
 alert, ACK lặp giữ nguyên trạng thái `acknowledged`. Full regression đạt
 `235/235` tại thời điểm acceptance; canonical verification cuối sau khi bổ
-sung release regression đạt `257/257`. Focused fault/session đạt `49/49`,
+sung release regression đạt `258/258`. Focused fault/session đạt `49/49`,
 browser smoke đạt 4/4 viewport và
 firmware chỉ được build, không upload. Kết quả này cho phép GO đối với MVP phần
 mềm demo/chấm môn, không mở rộng sang node vật lý, y tế hoặc 5G.
@@ -522,7 +522,7 @@ Probe A/B thực tế bao phủ hai counterexample đã xác định trước:
 Các case rollback sau alert write, duplicate, out-of-order và session migration
 có regression fixture riêng trong `tests/test_db.py` và
 `tests/test_ingestion.py`; chúng nằm trong source regression suite cuối
-`257 passed`.
+`258 passed`.
 Tuy nhiên,
 chúng không có A/B artifact lặp 30 lần, nên báo cáo không gán số `30/30` cho các
 case đó.
@@ -569,8 +569,8 @@ không phải packet loss, network latency, TCP behavior hay hiệu năng 5G.
 |---|---|---|
 | Provenance RQ1 | `VERIFIED_WITH_LIMITATION` | Baseline `commit_clean`, scoped SHA-256 `760429f9dceed614279cb6c937d111a66fb1cb63ca813ed615c7de1bbd24c280`; artifact hardened sinh với `worktree_uncommitted`, scoped SHA-256 `4bce098e63c53ab20bc7d9ab37162848504160b620c4a1a7ebba6ccfe7de5419`; source hiện ở commit `935c393e03a68465e538f624ff3405cd4560eb49`; phạm vi bốn file lõi |
 | Provenance RQ2 v5 | `VERIFIED_WITH_LIMITATION` | Artifact sinh với `worktree_uncommitted`; allowlisted source SHA-256 `f5e27d518f9a625397f289f90fd42bac9cf89d628c8e820a18ce55dfdacde280` khớp commit `935c393e03a68465e538f624ff3405cd4560eb49`; file set nằm trong aggregate |
-| One-command verification/final fingerprint | `VERIFIED` | `evidence/analysis/verification-latest.json`, artifact `1.3`, SHA-256 `9e82fe7fa3848812eb18fc0491f01fc250ac71032beb4e94c8d61f55e8eb0c69`; exact invocation `.\scripts\VERIFY-MVP.ps1 -IncludeDockerLive -IncludeFirmware`; `commit_clean` tại `935c393e03a68465e538f624ff3405cd4560eb49`; portable verification-input SHA-256 `df8660c0e5ff35364bab282e4cd6f6fb9c684682921df8ebd383f7b1acbea413` |
-| Source regression suite | `VERIFIED` | `257 passed` |
+| One-command verification/final fingerprint | `VERIFIED` | `evidence/analysis/verification-latest.json`, artifact `1.3`, SHA-256 `826a42b26a8d407f13fc6f691cc7305d1d96c305cf9b5c5354e3d63c252d28e8`; exact invocation `.\scripts\VERIFY-MVP.ps1 -IncludeDockerLive -IncludeFirmware`; `commit_clean` tại `ee0c2331e3aebdf8d08f6200c4f2b351d6f0893b`; portable verification-input SHA-256 `96d0c29637fdd0cfbb4398d36df9653577845ecb89a03aedc8843f48c94d6395` |
+| Source regression suite | `VERIFIED` | `258 passed` |
 | RQ1 deterministic probe | `VERIFIED` | baseline artifact SHA-256 `02c854020b2d04a85b1b76cd8c8ff5d1b025154bd6e390dbb0d8a2a976e764a1`; hardened artifact SHA-256 `8396bb41cc01a9f6017d8554b8926b6943d9decb02f3cb010316407eec6bd0d4` |
 | RQ2 v5, 30 matched seed/profile | `VERIFIED` | `evidence/analysis/rq2-v5-experiments.json`, SHA-256 `b2bb2e80edee83bd8a89531d079e4148ddb1442e7a9734cb2de353e4cddd4ffb` |
 | JavaScript syntax/browser smoke | `VERIFIED_WITH_LIMITATION` | `evidence/ui/browser-smoke.json`, artifact `1.1`, SHA-256 `e03c63d8849751fd57742839c0da802499f5eb757abaf55140b174012c210a02`; 320/360/768/1440 px pass; UI source SHA-256 `ad606917fe23f33f373f536bd7741eed5b30979da8e44d3f7ff78b438f7747c9`; served asset `0719c500352f`; không suy ra WCAG conformance |
@@ -578,8 +578,8 @@ không phải packet loss, network latency, TCP behavior hay hiệu năng 5G.
 | Compose config/live | `VERIFIED` | resolved config pass; live `/healthz` và capability boundary pass trong one-command verification |
 | Firmware `nodemcuv2` build-only | `VERIFIED_WITH_LIMITATION` | PlatformIO build thành công; RAM 43,0%, flash 29,5%; không dùng launcher/upload và không suy ra node vật lý đang chạy |
 | Physical node demo | `NOT_VERIFIED` | tùy chọn; không dùng bằng chứng build để suy ra node vật lý đang chạy |
-| Research evidence bundle | `VERIFIED` | `evidence/final/nt532-mqtt-mvp-evidence-v5.zip`, SHA-256 `def22cfdfbaf36acdd651bec0639ecda83e9f4cc20ea8cb69c00cc28aa60093f`; 189 file allowlist, aggregate tái tính khớp, 185 text file redaction pass; 60 `desktop.ini` bị loại |
-| Software acceptance bundle | `VERIFIED` | `evidence/final/nt532-software-e2e-acceptance.zip`, SHA-256 `da9c4a8d21ab40cd5e99c793973d77c775b570305d3f57d9ab6a57b780e7fe3a`; đúng 14 payload allowlist, 10 text file redaction pass; tách riêng để không tự tham chiếu hash |
+| Research evidence bundle | `VERIFIED` | `evidence/final/nt532-mqtt-mvp-evidence-v5.zip`, SHA-256 `52aa1960e98209560a61fe9c835a98d47e46f95a5e8780bc365a6a993e083daa`; 189 file allowlist, aggregate tái tính khớp, 185 text file redaction pass; 60 `desktop.ini` bị loại |
+| Software acceptance bundle | `VERIFIED` | `evidence/final/nt532-software-e2e-acceptance.zip`, SHA-256 `b6dc2e9016d97fecdb8394b653fc0dbee0eba2cd1073b099f3cf8dceff984542`; đúng 14 payload allowlist, 10 text file redaction pass; tách riêng để không tự tham chiếu hash |
 | Software E2E qua broker thật | `VERIFIED` | `plans/reports/260814-073149-software-e2e-acceptance/`: normal, motion artifact, low SpO2 và ACK đều pass; focused `49/49`, full regression `235/235`; không upload firmware |
 | DOCX render/visual/a11y QA | `VERIFIED_WITH_LIMITATION` | Word render đủ 32/32 trang; đã xem toàn bộ từng trang và contact sheet, không thấy clipping/overlap/glyph lỗi; audit tự động high/medium/low = `0/0/0`; bìa A4 đã áp dụng theo báo cáo tham chiếu do người dùng cung cấp, không được gọi là mẫu chính thức của trường |
 
@@ -674,7 +674,7 @@ Không mua thêm modem, board hay sensor. Chỉ thực hiện nếu có endpoint
 Đồ án đã được cải tiến thành testbed đánh giá độ tin cậy xử lý bản tin MQTT ở
 edge mà không mua thêm thiết bị. Hai counterexample deterministic cho atomic
 alert và old LWT đều tái hiện thất bại trên baseline `0/30` và đạt trên working
-tree hardened `30/30`; source regression suite cuối đạt `257 passed`. RQ2 v5 hoàn
+tree hardened `30/30`; source regression suite cuối đạt `258 passed`. RQ2 v5 hoàn
 thành 30 cặp seed. App impairment làm median scheduled observation ratio giảm
 `0,166667`, đồng thời làm p50/p95 schedule-to-API polling upper-bound tăng
 `363,0/634,275 ms` theo paired seed. Attempted delivery vẫn là `1,0` ở cả hai
@@ -726,8 +726,8 @@ python -m simulator.aggregate --input-dir evidence/runs --output evidence/analys
 | RQ2 aggregate/paired KPI/clock | `simulator/aggregate.py` | `tests/test_experiment_aggregate.py::test_aggregate_reconciles_30_matched_seeds_and_reports_paired_treatment_metrics`; tamper/latency-boundary tests | `evidence/analysis/rq2-v5-experiments.json` | Bảng 7.3 | `VERIFIED` |
 | UI responsive/a11y smoke | `edge/static/index.html`, `edge/static/styles.css`, `edge/static/app.js` | `scripts/dashboard-browser-smoke.js`; dashboard static tests | `evidence/ui/browser-smoke.json` và bốn PNG có SHA-256 đối chiếu | Ledger | `VERIFIED_WITH_LIMITATION` |
 | Software E2E scenarios + ACK | `simulator/mqtt_simulator.py`, `edge/service.py`, `edge/app.py` | ba exact command/seed trong Phụ lục A; ACK lặp trên cùng alert | `plans/reports/260814-073149-software-e2e-acceptance/scenario-acceptance.json` và `scenario-observations.json` | Mục 8/Ledger | `VERIFIED` |
-| Research evidence/redaction | `simulator/experiment.py`, `simulator/aggregate.py` | allowlist + duplicate-key/secret/path scan trong `scripts/package_final_evidence.py` | `evidence/final/nt532-mqtt-mvp-evidence-v5.zip`, SHA-256 `def22cfdfbaf36acdd651bec0639ecda83e9f4cc20ea8cb69c00cc28aa60093f` | Ledger | `VERIFIED` |
-| Software acceptance packaging | `scripts/package_software_acceptance.py` | exact 14-file allowlist, API/browser/dry-run reconciliation, duplicate-key/secret/path/self-hash scan | `evidence/final/nt532-software-e2e-acceptance.zip`, SHA-256 `da9c4a8d21ab40cd5e99c793973d77c775b570305d3f57d9ab6a57b780e7fe3a` | Mục 8/Ledger | `VERIFIED` |
+| Research evidence/redaction | `simulator/experiment.py`, `simulator/aggregate.py` | allowlist + duplicate-key/secret/path scan trong `scripts/package_final_evidence.py` | `evidence/final/nt532-mqtt-mvp-evidence-v5.zip`, SHA-256 `52aa1960e98209560a61fe9c835a98d47e46f95a5e8780bc365a6a993e083daa` | Ledger | `VERIFIED` |
+| Software acceptance packaging | `scripts/package_software_acceptance.py` | exact 14-file allowlist, API/browser/dry-run reconciliation, duplicate-key/secret/path/self-hash scan | `evidence/final/nt532-software-e2e-acceptance.zip`, SHA-256 `b6dc2e9016d97fecdb8394b653fc0dbee0eba2cd1073b099f3cf8dceff984542` | Mục 8/Ledger | `VERIFIED` |
 | 5G claim boundary | `docs/network-and-security.md` | review + aggregate boundary validation | `network_claim=none`; `measured_5g=false` | Mục 2.3/10.3 | `VERIFIED` |
 
 # Phụ lục C - Checklist trước khi đổi trạng thái nộp bài

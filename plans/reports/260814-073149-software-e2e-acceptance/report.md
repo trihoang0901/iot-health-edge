@@ -59,9 +59,9 @@ python -m simulator --device-id health-node-01 --scenario low_spo2 --count 20 --
 Source runner được khóa bằng SHA-256
 `f5e27d518f9a625397f289f90fd42bac9cf89d628c8e820a18ce55dfdacde280`;
 verification canonical artifact `1.3` có SHA-256
-`9e82fe7fa3848812eb18fc0491f01fc250ac71032beb4e94c8d61f55e8eb0c69`.
+`826a42b26a8d407f13fc6f691cc7305d1d96c305cf9b5c5354e3d63c252d28e8`.
 Con số `235/235` ở bảng trên là tại thời điểm chạy acceptance; canonical
-verification sau commit source sạch đạt `257/257`.
+verification sau commit source sạch đạt `258/258`.
 
 # Kiểm tra giao diện
 
