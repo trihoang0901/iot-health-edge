@@ -34,9 +34,11 @@ $runningReport = [ordered]@{
     overall_status = 'running'
     checks = @()
 }
+$runningReportJson = $runningReport | ConvertTo-Json -Depth 5
+$runningReportJson = $runningReportJson.Replace("`r`n", "`n").Replace("`r", "`n")
 [System.IO.File]::WriteAllText(
     $reportPath,
-    (($runningReport | ConvertTo-Json -Depth 5) + "`n"),
+    ($runningReportJson + "`n"),
     $utf8NoBom
 )
 
@@ -184,6 +186,7 @@ $report = [ordered]@{
 }
 
 $reportJson = $report | ConvertTo-Json -Depth 5
+$reportJson = $reportJson.Replace("`r`n", "`n").Replace("`r", "`n")
 [System.IO.File]::WriteAllText($reportPath, $reportJson + "`n", $utf8NoBom)
 Write-Host "`nVerification report: $reportPath"
 Write-Host "Overall: $($report.overall_status)"

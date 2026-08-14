@@ -7,6 +7,9 @@ import pytest
 from scripts import verification_source_fingerprint as fingerprint
 
 
+PROJECT_ROOT = Path(__file__).resolve().parents[1]
+
+
 def _create_verification_tree(root: Path) -> None:
     for relative in fingerprint.ROOT_FILES:
         path = root / relative
@@ -81,3 +84,9 @@ def test_fixed_root_file_reparse_is_rejected(tmp_path: Path, monkeypatch) -> Non
 
     with pytest.raises(ValueError, match="symlink or reparse input forbidden"):
         fingerprint.verification_files()
+
+
+def test_verify_report_normalizes_json_to_lf_before_writing() -> None:
+    script = (PROJECT_ROOT / "scripts/VERIFY-MVP.ps1").read_text(encoding="utf-8")
+
+    assert script.count('.Replace("`r`n", "`n").Replace("`r", "`n")') == 2
