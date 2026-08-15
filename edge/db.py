@@ -27,7 +27,14 @@ _STREAM_SEQUENCE_COLUMNS = {
     "status": "last_status_seq",
 }
 _LWT_REASONS = {"mqtt_lost", "connection_lost"}
-_CONNECTION_START_REASONS = {"connected", "simulator_started"}
+_RECOVERY_REASONS = {
+    "recovered_provisioning",
+    "recovered_wifi_profile",
+    "recovered_broker_ip_change",
+    "recovered_dns_fallback",
+    "recovered_mqtt_transport",
+}
+_CONNECTION_START_REASONS = {"connected", "simulator_started", *_RECOVERY_REASONS}
 
 
 class AlertAlreadyResolvedError(RuntimeError):
@@ -116,7 +123,16 @@ class Database:
                     online INTEGER NOT NULL DEFAULT 0 CHECK (online IN (0, 1)),
                     last_seen_at TEXT,
                     last_status_at TEXT,
+                    last_status_reason TEXT,
+                    last_status_retained INTEGER CHECK (
+                        last_status_retained IS NULL OR last_status_retained IN (0, 1)
+                    ),
                     status_reason TEXT,
+                    status_reason_at TEXT,
+                    last_recovery_reason TEXT,
+                    last_recovery_at TEXT,
+                    command_session_id TEXT,
+                    correlation_id TEXT,
                     rssi_dbm INTEGER,
                     free_heap INTEGER,
                     fw TEXT,
@@ -222,12 +238,34 @@ class Database:
                     ON device_sessions(device_id, superseded_at);
                 """
             )
+            self._migrate_device_columns(connection)
             self._migrate_telemetry_columns(connection)
             self._migrate_device_session_columns(connection)
             self._backfill_device_sessions(connection)
             self._migrate_legacy_alert_history(connection)
             self._resolve_retired_surface_alerts(connection)
             connection.commit()
+
+    @staticmethod
+    def _migrate_device_columns(connection: sqlite3.Connection) -> None:
+        columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(devices)").fetchall()
+        }
+        additions = {
+            "status_reason_at": "TEXT",
+            "last_recovery_reason": "TEXT",
+            "last_recovery_at": "TEXT",
+            "last_status_reason": "TEXT",
+            "last_status_retained": "INTEGER",
+            "command_session_id": "TEXT",
+            "correlation_id": "TEXT",
+        }
+        for name, declaration in additions.items():
+            if name not in columns:
+                connection.execute(
+                    f"ALTER TABLE devices ADD COLUMN {name} {declaration}"  # noqa: S608
+                )
 
     @staticmethod
     def _migrate_telemetry_columns(connection: sqlite3.Connection) -> None:
@@ -675,6 +713,8 @@ class Database:
                 VALUES (?, ?, 0, ?)
                 ON CONFLICT(device_id) DO UPDATE SET
                     boot_id = excluded.boot_id,
+                    command_session_id = NULL,
+                    correlation_id = NULL,
                     updated_at = excluded.updated_at
                 """,
                 (device_id, boot_id, received_at),
@@ -893,15 +933,27 @@ class Database:
         status: DeviceStatus,
         received: datetime,
         connection: sqlite3.Connection | None = None,
+        *,
+        retained: bool | None = None,
     ) -> None:
         received_at = isoformat_utc(received)
+        is_recovery = status.online and status.reason in _RECOVERY_REASONS
+        command_session_id = (
+            str(status.command_session_id) if status.command_session_id is not None else None
+        )
+        correlation_id = (
+            str(status.correlation_id) if status.correlation_id is not None else None
+        )
         with self._write_scope(connection) as active_connection:
             active_connection.execute(
                 """
                 INSERT INTO devices (
                     device_id, boot_id, online, last_seen_at, last_status_at,
-                    status_reason, rssi_dbm, free_heap, fw, faults_json, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    last_status_reason, last_status_retained, status_reason,
+                    status_reason_at, last_recovery_reason, last_recovery_at,
+                    command_session_id, correlation_id, rssi_dbm, free_heap,
+                    fw, faults_json, updated_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(device_id) DO UPDATE SET
                     boot_id = excluded.boot_id,
                     online = excluded.online,
@@ -910,7 +962,36 @@ class Database:
                         ELSE devices.last_seen_at
                     END,
                     last_status_at = excluded.last_status_at,
-                    status_reason = excluded.status_reason,
+                    last_status_reason = excluded.last_status_reason,
+                    last_status_retained = excluded.last_status_retained,
+                    status_reason = CASE
+                        WHEN excluded.status_reason = 'heartbeat'
+                        THEN devices.status_reason
+                        ELSE excluded.status_reason
+                    END,
+                    status_reason_at = CASE
+                        WHEN excluded.status_reason = 'heartbeat'
+                        THEN devices.status_reason_at
+                        ELSE excluded.status_reason_at
+                    END,
+                    last_recovery_reason = COALESCE(
+                        excluded.last_recovery_reason,
+                        devices.last_recovery_reason
+                    ),
+                    last_recovery_at = COALESCE(
+                        excluded.last_recovery_at,
+                        devices.last_recovery_at
+                    ),
+                    command_session_id = COALESCE(
+                        excluded.command_session_id,
+                        devices.command_session_id
+                    ),
+                    correlation_id = CASE
+                        WHEN excluded.command_session_id IS NOT NULL
+                         AND excluded.command_session_id != devices.command_session_id
+                        THEN excluded.correlation_id
+                        ELSE COALESCE(excluded.correlation_id, devices.correlation_id)
+                    END,
                     rssi_dbm = excluded.rssi_dbm,
                     free_heap = excluded.free_heap,
                     fw = excluded.fw,
@@ -924,6 +1005,13 @@ class Database:
                     received_at if status.online else None,
                     received_at,
                     status.reason,
+                    None if retained is None else int(retained),
+                    status.reason,
+                    received_at,
+                    status.reason if is_recovery else None,
+                    received_at if is_recovery else None,
+                    command_session_id,
+                    correlation_id,
                     status.system.rssi_dbm,
                     status.system.free_heap,
                     status.system.fw,
@@ -1342,6 +1430,10 @@ class Database:
     def _device_dict(row: sqlite3.Row) -> dict[str, Any]:
         result = dict(row)
         result["online"] = bool(result["online"])
+        if "last_status_retained" in result:
+            result["last_status_retained"] = _bool_or_none(
+                result["last_status_retained"]
+            )
         result["faults"] = json.loads(result.pop("faults_json") or "[]")
         return result
 

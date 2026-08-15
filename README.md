@@ -10,6 +10,38 @@ thiết bị y tế. DS18B20 chỉ cung cấp nhiệt độ **bề mặt tại �
 prototype; giá trị này không phải nhiệt độ cơ thể/lõi, không dùng để kết luận
 sốt và không kích hoạt cảnh báo nhiệt độ.
 
+## Trạng thái phiên bản và bằng chứng
+
+- Source hiện tại là firmware `0.4.0`, bổ sung tự phục hồi Wi-Fi/broker,
+  LittleFS hai slot và captive portal. Phiên bản này mới có bằng chứng tự động
+  (native/unit/build); các bài nghiệm thu phần cứng phục hồi mạng vẫn để
+  **CHƯA XÁC NHẬN** trong checklist.
+- Các số đọc, boot ID, ảnh và kết quả phần cứng ghi `0.3.1` bên dưới là bằng
+  chứng lịch sử ngày 14/08/2026. Chúng không được relabel thành `0.4.0` và không
+  chứng minh state machine recovery mới đã chạy trên node vật lý.
+- Nâng từ `0.3.1` lên `0.4.0` cần đúng một lần `Flash` có chủ đích. Sau lần đó,
+  đổi giữa Wi-Fi đã lưu hoặc đổi endpoint broker không cần USB/reflash.
+
+## Tự phục hồi mạng trong `0.4.0`
+
+Node thử profile last-good trước rồi theo priority, nhận DHCP, phân giải lại
+broker và thử fallback IPv4 chỉ thuộc đúng subnet profile. Sau một full sweep
+thất bại mới backoff `1..30 s`; sau khoảng 45 giây không có đường kết nối hợp
+lệ, captive portal mở một lần mỗi boot với hard deadline 300 giây. Lỗi xác thực
+MQTT không kích hoạt roam/portal vì đổi Wi-Fi không sửa được credential.
+
+Cấu hình runtime nằm trong LittleFS theo hai slot `committed`/`candidate` có
+`schema_version`, `generation` và CRC32. Portal ghi candidate qua temp-file +
+rename; chỉ promote sau Wi-Fi → DHCP → DNS/fallback → MQTT authentication thành
+công. Trial lỗi hoặc mất điện giữ cấu hình committed trước đó; firmware không
+tự format filesystem.
+
+Launcher Windows có các mode `Start`, `Doctor`, `Verify`, `Flash`, `OpenPortal`
+và `ShowPortalAccess`. Chỉ `Flash` được upload application image và không erase
+LittleFS. `OpenPortal` chỉ dùng được khi node còn online: edge yêu cầu heartbeat
+trực tiếp không-retained, gửi command QoS 1 `retain=false`, rồi launcher chờ
+receipt `provisioning_started` đúng correlation ID.
+
 ## Định vị đồ án NT532
 
 Tên đề tài MVP:
@@ -30,10 +62,6 @@ hành chính Nhóm 3 đã được điền theo mẫu tham chiếu do người d
 các giới hạn kỹ thuật được giữ công khai trong report/evidence.
 
 Evidence kỹ thuật khóa ngày 14/08/2026:
-
-> Khối evidence dưới đây thuộc artifact/commit trước telemetry v4. Nó không xác
-> nhận worktree firmware `0.4.0`; validation hiện tại được ghi riêng trong
-> journal PPG và chưa có physical upload.
 
 - implementation hiện đã được commit tại
   `bba2bc745fbf83bc5ac226e2d5b665594dbe7ba0`; các trạng thái
@@ -78,34 +106,6 @@ lý, độ chính xác y tế hoặc backhaul 5G.
 Yêu cầu: Docker Desktop đang chạy. Python 3.11+ chỉ cần cho simulator hoặc khi
 chọn chạy edge trực tiếp. Để chạy local, test, artifact runner và browser smoke,
 cài dependency khóa của project:
-
-### Bộ launcher Windows khuyến nghị
-
-Lần đầu tiên, chạy installer rồi điền các file cấu hình mẫu mà installer tạo.
-Installer giữ nguyên `.env`, `secrets.h` và credential Mosquitto nếu đã tồn tại.
-Nó chỉ kiểm tra Docker Desktop/Python, không tự cài các công cụ này hoặc driver USB/CH340:
-
-```powershell
-.\INSTALL-IOT-HEALTH-EDGE.bat
-```
-
-Các lần sau, chọn đúng thao tác thay vì dùng một launcher làm mọi việc:
-
-```powershell
-.\START-SOFTWARE.bat          # Docker + MQTT + edge + dashboard, không upload
-.\START-HARDWARE.bat          # kiểm tra, upload NodeMCU, xác minh telemetry mới
-.\STATUS-IOT-HEALTH-EDGE.bat  # trạng thái container/API/MQTT
-.\LOGS-IOT-HEALTH-EDGE.bat    # edge/mosquitto, tối đa 200 dòng trong 10 phút
-.\STOP-IOT-HEALTH-EDGE.bat    # dừng nhưng giữ Docker volumes
-```
-
-`START-IOT-HEALTH-EDGE.bat` giữ hành vi cũ: nếu không thấy CH340, nó vẫn khởi
-động software và bỏ qua upload. `START-HARDWARE.bat` mới fail-closed khi thiếu
-board/PlatformIO. Khi chỉ muốn mở dashboard, gọi thẳng `START-SOFTWARE.bat`.
-Toàn bộ wrapper gọi lõi `IOT-HEALTH-EDGE.ps1`; có thể đặt `--no-pause` ở bất kỳ vị trí nào.
-Riêng logs nhận thêm `-Tail 50 -Since 5m` và không nạp `.env` chỉ để đọc log.
-
-### Cài thủ công
 
 ```powershell
 python -m pip install -e ".[test,artifact]"
@@ -168,7 +168,6 @@ Mở `http://127.0.0.1:8000`. Các kịch bản có sẵn:
 
 ```powershell
 python -m simulator --scenario motion_artifact --count 20
-python -m simulator --scenario unstable_ppg --count 6
 python -m simulator --scenario ds18b20_fault --count 20
 python -m simulator --scenario low_spo2 --count 20
 python -m simulator --scenario high_hr --count 20
@@ -199,39 +198,37 @@ phi lâm sàng, không phải hệ thống cấp cứu.
 2. Bật hotspot/router ở Wi-Fi 2,4 GHz (ESP8266 không hỗ trợ Wi-Fi 5 GHz),
    khởi tạo broker như trên và tìm IPv4 của laptop bằng `ipconfig`.
 3. Cho phép TCP 1883 trên Windows Firewall **chỉ với mạng Private**.
-4. Điền Wi-Fi, IPv4 broker hiện tại và tài khoản node vào
-   `firmware/health-node/include/secrets.h`. Nếu dùng broker trên laptop, có thể
-   chạy `START-HARDWARE.bat` (hoặc tên tương thích
-   `START-IOT-HEALTH-EDGE.bat`); launcher sẽ dừng trước khi nạp nếu
-   `MQTT_HOST` không khớp một IPv4 cục bộ đang hoạt động.
-5. Xem Serial Monitor trước, sau đó kiểm tra dashboard và [checklist](docs/test-checklist.md).
+4. Cho lần nâng cấp đầu tiên lên `0.4.0`, điền bootstrap Wi-Fi, broker và tài
+   khoản node vào `firmware/health-node/include/secrets.h`, rồi chạy
+   `START-IOT-HEALTH-EDGE.bat Flash -Port COMx -NoPause`. Các lần `Start` và
+   `Verify` sau đó không đọc bootstrap cũ và không upload.
+5. Cấu hình tối đa ba profile Wi-Fi cùng hostname/fallback broker qua captive
+   portal, sau đó chạy toàn bộ ma trận **0.4.0 chưa xác nhận** trong
+   [checklist](docs/test-checklist.md). Không dùng bằng chứng 0.3.1 lịch sử để
+   đánh dấu các mục recovery mới.
 
 Linh kiện cốt lõi người dùng đã có đủ. Breadboard, dây Dupont, cáp USB data và
 nguồn ổn định chỉ là vật tư hỗ trợ lắp thử. DS18B20 dùng chế độ cấp nguồn ba dây:
 VDD lên 3V3, GND chung, DATA tại D5/GPIO14 và điện trở **4,7 kΩ** từ DATA lên
-3V3. Firmware `0.4.0` bật thêm pull-up nội yếu của ESP8266 như một fallback cho
-dây prototype ngắn; fallback này không thay thế điện trở ngoài. Bản wearable ổn
-định vẫn bắt buộc có pull-up 4,7 kΩ đúng tại DATA lên 3V3. Không dùng
+3V3. Source `0.4.0` giữ pull-up nội yếu của ESP8266 như một fallback cho dây
+prototype ngắn; hành vi này mới có bằng chứng phần cứng lịch sử trên `0.3.1` và
+không thay thế điện trở ngoài. Bản wearable ổn định vẫn bắt buộc có pull-up
+4,7 kΩ đúng tại DATA lên 3V3. Không dùng
 parasite-power trong cấu hình này. Buzzer/nút nhấn là tùy chọn; thao tác ACK
 chính nằm trên dashboard.
 
-Source firmware `0.4.0` phát strict `health.telemetry.v4`: ứng viên
-`heart_rate_raw_bpm`/`spo2_raw_pct` được lưu để audit, còn field HR/SpO₂ cũ chỉ
-chứa giá trị confirmed sau `PpgQualityGate`. Khi `ppg_state` là `warming_up`,
-`unstable`, `motion`, `clipping` hoặc `low_perfusion`, confirmed là `null` và
-dashboard hiện “Đang xác nhận” hoặc lý do tương ứng. Telemetry vẫn có
+Source firmware `0.4.0` tiếp tục phát strict `health.telemetry.v3` với
 `wearable.wrist_surface_temp_c` và `quality.wrist_surface_temp_valid`. Phép
 chuyển đổi DS18B20 12-bit được yêu cầu bất đồng bộ rồi đọc sau ít nhất `750 ms`;
-vòng lặp không chờ bằng `delay()`. Edge tiếp tục xác thực v1/v2/v3 và giữ nguyên
+vòng lặp không chờ bằng `delay()`. Edge tiếp tục xác thực v1/v2 và giữ nguyên
 dữ liệu `skin_temp_*`, môi trường DHT11 cùng raw payload lịch sử trong SQLite;
 không giá trị legacy nào bị đổi nghĩa thành nhiệt độ cổ tay. Firmware nhận
 MPU-6050 có `WHO_AM_I=0x68` hoặc module
 MPU-6500-compatible có `WHO_AM_I=0x70`, cùng ở địa chỉ I2C `0x68`. Mã lỗi công
 khai cũ `mpu6050_unavailable` được giữ lại cho cả hai biến thể để không phá vỡ
-edge/dashboard. Xem [hợp đồng dữ liệu](docs/data-contract.md) và
-[quy trình hiệu chỉnh PPG](docs/ppg-quality-gate.md).
+edge/dashboard. Xem chi tiết trong [hợp đồng dữ liệu](docs/data-contract.md).
 
-### Bằng chứng phần cứng lịch sử — chưa xác nhận firmware 0.4.0
+### Bằng chứng phần cứng lịch sử `0.2.2`/`0.3.1`
 
 Firmware `0.2.2` đã sửa và được kiểm tra trên phần cứng cho đường khôi phục FIFO
 MAX30102: không dùng giá trị

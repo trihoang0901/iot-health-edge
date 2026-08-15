@@ -1,55 +1,170 @@
-import os
+import importlib.util
+import re
 import shutil
 import subprocess
 from pathlib import Path
 
 import pytest
+from paho.mqtt.reasoncodes import PacketTypes, ReasonCode
 
 
 ROOT = Path(__file__).resolve().parents[1]
-LAUNCHER = ROOT / "IOT-HEALTH-EDGE.ps1"
-LEGACY_LAUNCHER = ROOT / "START-IOT-HEALTH-EDGE.bat"
-AUTH_PROBE_SCRIPT = ROOT / "deploy" / "scripts" / "Test-NodeMqttCredential.ps1"
-WRAPPERS = {
-    "INSTALL-IOT-HEALTH-EDGE.bat": "Install",
-    "START-SOFTWARE.bat": "StartSoftware",
-    "START-HARDWARE.bat": "StartHardware",
-    "START-IOT-HEALTH-EDGE.bat": "StartLegacy",
-    "STOP-IOT-HEALTH-EDGE.bat": "Stop",
-    "STATUS-IOT-HEALTH-EDGE.bat": "Status",
-    "LOGS-IOT-HEALTH-EDGE.bat": "Logs",
-}
+BAT = ROOT / "START-IOT-HEALTH-EDGE.bat"
+LAUNCHER = ROOT / "scripts" / "Start-IotHealthEdge.ps1"
+DOCTOR = ROOT / "scripts" / "Test-MqttAccess.py"
 
 
-def _function_source(source: str, name: str, next_name: str) -> str:
-    return source.split(f"function {name}", 1)[1].split(f"function {next_name}", 1)[0]
+def _function(source: str, name: str) -> str:
+    match = re.search(
+        rf"(?ms)^function {re.escape(name)} \{{(.*?)(?=^function |^try \{{\s*$)",
+        source,
+    )
+    assert match, f"missing PowerShell function {name}"
+    return match.group(1)
 
 
-def test_post_upload_gate_is_fresh_v4_node_specific_and_locale_independent():
+def test_bat_is_only_a_powershell_51_wrapper():
+    source = BAT.read_text(encoding="utf-8")
+    assert "scripts\\Start-IotHealthEdge.ps1" in source
+    assert "powershell.exe -NoLogo -NoProfile" in source
+    assert "docker " not in source.lower()
+    assert "platformio" not in source.lower()
+    assert "upload" not in source.lower()
+
+
+def test_launcher_declares_all_modes_and_defaults_to_start():
     source = LAUNCHER.read_text(encoding="utf-8")
-
-    assert "[Globalization.CultureInfo]::InvariantCulture" in source
-    assert "[Globalization.DateTimeStyles]::AssumeUniversal" in source
-    assert "[Globalization.DateTimeStyles]::AdjustToUniversal" in source
-    assert "[DateTimeOffset]::UtcNow" in source
-    assert "Parse($latest.received_at, $culture, $styles)" in source
-    assert "$device.online -eq $true" in source
-    assert "$received -ge $StartedAt" in source
-    assert "$schema -eq 'health.telemetry.v4'" in source
-    assert "$latest.system.fw -eq '0.4.0'" in source
-    gate = _function_source(source, "Wait-FreshHardwareTelemetry", "Start-HardwareStack")
-    assert "throw 'Chua nhan telemetry v4 moi" in gate
-    hardware = _function_source(source, "Start-HardwareStack", "Stop-System")
-    assert hardware.index("'--target', 'upload'") < hardware.index(
-        "$uploadCompletedUtc = [DateTimeOffset]::UtcNow"
-    ) < hardware.index("Wait-FreshHardwareTelemetry")
+    assert "[string]$Mode = 'Start'" in source
+    for mode in ("Start", "Doctor", "Verify", "Flash", "OpenPortal", "ShowPortalAccess"):
+        assert f"'{mode}'" in source
 
 
-def test_launcher_timestamp_style_keeps_z_and_offset_times_in_utc():
+def test_only_flash_mode_can_upload_and_it_never_erases_littlefs():
+    source = LAUNCHER.read_text(encoding="utf-8")
+    flash = _function(source, "Invoke-FlashMode")
+    assert "--target upload" in flash
+    without_flash = source.replace(flash, "")
+    assert "--target upload" not in without_flash
+    assert "--target uploadfs" not in source
+    assert "--target erase" not in source
+    assert "erasefs" not in source.lower()
+
+
+def test_start_and_verify_do_not_depend_on_bootstrap_or_usb():
+    source = LAUNCHER.read_text(encoding="utf-8")
+    start = _function(source, "Invoke-StartMode")
+    verify = _function(source, "Invoke-VerifyMode")
+    for body in (start, verify):
+        assert "Assert-BootstrapConfig" not in body
+        assert "Find-Ch340Port" not in body
+        assert "--upload-port" not in body
+    assert "Wait-NewTelemetry" in start
+    assert "-IncludeFirmware" in verify
+
+
+def test_fresh_telemetry_gate_is_locale_independent():
+    source = LAUNCHER.read_text(encoding="utf-8")
+    gate = _function(source, "Wait-NewTelemetry")
+    assert "[Globalization.CultureInfo]::InvariantCulture" in gate
+    assert "[Globalization.DateTimeStyles]::AssumeUniversal" in gate
+    assert "[Globalization.DateTimeStyles]::AdjustToUniversal" in gate
+    assert "Parse($latest.received_at, $culture, $styles)" in gate
+    assert "$device.online -eq $true" in gate
+    assert "$received -ge $StartedAt" in gate
+
+
+def test_open_portal_uses_edge_command_and_execution_correlation():
+    source = LAUNCHER.read_text(encoding="utf-8")
+    body = _function(source, "Invoke-OpenPortalMode")
+    wait = _function(source, "Wait-LiveCommandHeartbeat")
+    assert "/commands/open-provisioning" in body
+    assert "Wait-LiveCommandHeartbeat" in body
+    assert "$device.last_status_reason -eq 'heartbeat'" in wait
+    assert "$device.last_status_retained -eq $false" in wait
+    assert "$ageSeconds -ge 0 -and $ageSeconds -le 10" in wait
+    assert "$body = @{}" in body
+    assert "[guid]::NewGuid" not in body
+    assert "$webResponse.StatusCode -ne 202" in body
+    assert "$response.qos" in body and "$response.retain -ne $false" in body
+    assert "$device.status_reason -eq 'provisioning_started'" in body
+    assert "$device.correlation_id -eq $response.command_id" in body
+
+
+def test_portal_secret_uses_dpapi_and_clipboard_only_on_explicit_click():
+    source = LAUNCHER.read_text(encoding="utf-8")
+    assert "RNGCryptoServiceProvider" in source
+    assert "ConvertFrom-SecureString" in source
+    assert "ConvertTo-SecureString" in source
+    assert "portal-access.dpapi" in source
+    assert "PROVISIONING_AP_PASSWORD" in source
+    assert "Write-Host $secret" not in source
+    assert "Write-Output $secret" not in source
+    assert "--portal" not in source.lower()
+    show = _function(source, "Invoke-ShowPortalAccessMode")
+    assert "Add_Click({ [Windows.Forms.Clipboard]::SetText($box.Text) })" in show
+    assert show.count("Clipboard") == 1
+
+
+def test_doctor_password_is_environment_only_not_an_argument():
+    source = LAUNCHER.read_text(encoding="utf-8")
+    helper = DOCTOR.read_text(encoding="utf-8")
+    assert "$env:IOT_HEALTH_DOCTOR_MQTT_PASSWORD = $settings.MQTT_PASSWORD" in source
+    assert "--password" not in source
+    assert 'os.environ.get("IOT_HEALTH_DOCTOR_MQTT_PASSWORD")' in helper
+    assert 'add_argument("--password"' not in helper
+    assert "protocol=mqtt.MQTTv5" in helper
+    assert "clean_session=" not in helper
+    assert "retain=False" in helper
+
+
+def test_doctor_handles_real_paho_v2_reason_codes_without_int_coercion():
+    spec = importlib.util.spec_from_file_location("mqtt_doctor", DOCTOR)
+    assert spec is not None and spec.loader is not None
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    assert module._reason_is_failure(
+        ReasonCode(PacketTypes.CONNACK, "Success")
+    ) is False
+    assert module._reason_is_failure(
+        ReasonCode(PacketTypes.SUBACK, "Granted QoS 1")
+    ) is False
+    assert module._reason_is_failure(
+        ReasonCode(PacketTypes.PUBACK, "Not authorized")
+    ) is True
+
+
+def test_launcher_parses_in_windows_powershell_51():
     powershell = shutil.which("powershell.exe")
     if powershell is None:
-        pytest.skip("Windows PowerShell is required for the launcher timestamp check")
+        pytest.skip("Windows PowerShell is required")
+    command = (
+        "$errors=$null; "
+        f"[Management.Automation.Language.Parser]::ParseFile('{LAUNCHER}',"
+        "[ref]$null,[ref]$errors)|Out-Null; if($errors.Count){exit 1}"
+    )
+    subprocess.run(
+        [powershell, "-NoLogo", "-NoProfile", "-Command", command],
+        check=True,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=10,
+    )
 
+
+def test_verify_helper_is_build_only():
+    source = (ROOT / "scripts" / "VERIFY-MVP.ps1").read_text(encoding="utf-8")
+    assert "& $platformio test --project-dir $firmwareDir --environment native" in source
+    assert "& $platformio run --project-dir $firmwareDir --environment nodemcuv2" in source
+    assert "--target upload" not in source
+    assert "--upload-port" not in source
+
+
+def test_timestamp_style_keeps_z_and_offset_times_in_utc():
+    powershell = shutil.which("powershell.exe")
+    if powershell is None:
+        pytest.skip("Windows PowerShell is required")
     command = r"""
 [Globalization.CultureInfo]::CurrentCulture = [Globalization.CultureInfo]::GetCultureInfo('vi-VN')
 $culture = [Globalization.CultureInfo]::InvariantCulture
@@ -66,343 +181,3 @@ if ($started.Offset -ne [TimeSpan]::Zero -or $received.Offset -ne [TimeSpan]::Ze
         encoding="utf-8",
         timeout=10,
     )
-
-
-def test_native_quiet_probe_handles_powershell_51_stderr_by_exit_code():
-    powershell = shutil.which("powershell.exe")
-    if powershell is None:
-        pytest.skip("Windows PowerShell is required for native probe regression")
-
-    source = LAUNCHER.read_text(encoding="utf-8")
-    helper = "function Invoke-NativeQuiet" + _function_source(
-        source, "Invoke-NativeQuiet", "Get-ComposeBaseArguments"
-    )
-    command = (
-        helper
-        + r'''
-$ErrorActionPreference = 'Stop'
-try {
-    $rc = Invoke-NativeQuiet -FilePath 'cmd.exe' -ArgumentList @('/c', 'echo simulated-error 1>&2 & exit /b 7')
-    if ($rc -ne 7 -or $ErrorActionPreference -ne 'Stop') { exit 2 }
-    exit 0
-}
-catch {
-    exit 3
-}
-'''
-    )
-    completed = subprocess.run(
-        [powershell, "-NoLogo", "-NoProfile", "-Command", command],
-        check=False,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        timeout=10,
-    )
-
-    assert completed.returncode == 0
-    assert completed.stdout == ""
-    assert completed.stderr == ""
-
-
-def test_compose_base_arguments_keep_compose_before_global_compose_options():
-    source = LAUNCHER.read_text(encoding="utf-8")
-    compose_helper = _function_source(
-        source, "Get-ComposeBaseArguments", "Assert-DockerReady"
-    )
-
-    assert "$arguments = @('compose')" in compose_helper
-    assert compose_helper.index("@('compose')") < compose_helper.index("'--env-file'")
-    assert compose_helper.index("@('compose')") < compose_helper.index("'-f'")
-
-
-def test_launcher_uses_local_python_module_instead_of_copied_pio_executable():
-    source = LAUNCHER.read_text(encoding="utf-8")
-
-    assert ".platformio-venv\\Scripts\\python.exe" in source
-    assert "Invoke-NativeQuiet -FilePath $pythonPath" in source
-    assert "Prefix = @('-m', 'platformio')" in source
-    assert ".platformio-venv\\Scripts\\pio.exe" not in source
-
-
-def test_node_mqtt_auth_probe_runs_after_compose_and_before_firmware_upload():
-    source = LAUNCHER.read_text(encoding="utf-8")
-    probe_source = AUTH_PROBE_SCRIPT.read_text(encoding="utf-8")
-
-    software = _function_source(source, "Start-SoftwareStack", "Get-PythonLauncher")
-    hardware = _function_source(source, "Start-HardwareStack", "Stop-System")
-    assert software.index("@('up', '-d', '--build')") < software.index(
-        "@('restart', 'mosquitto')"
-    ) < software.index("Wait-EdgeHealthy")
-    assert hardware.index("Start-SoftwareStack") < hardware.index(
-        "Test-NodeMqttCredential.ps1"
-    ) < hardware.index("'--target', 'upload'") < hardware.index(
-        "Wait-FreshHardwareTelemetry"
-    )
-    assert "$health.database.healthy -eq $true" in source
-    assert "$health.mqtt.connected -eq $true" in source
-    assert "$health.mqtt.subscribed -eq $true" in source
-    assert "$health.ingestion.worker_alive -eq $true" in source
-    assert "ConvertTo-Json -Compress" in probe_source
-    assert "ToBase64String" in probe_source
-    assert "device_id =" not in probe_source
-    assert "will_set" not in (ROOT / "edge" / "mqtt_auth_probe.py").read_text(
-        encoding="utf-8"
-    )
-    assert "Test-FirmwareWriteAcl" in probe_source
-    assert "[switch]$HostBroker" in probe_source
-    assert "[switch]$StaticOnly" in probe_source
-    assert "127.0.0.1" in probe_source
-    assert "iot-health/v1/devices/$DeviceId/telemetry" in probe_source
-    assert "iot-health/v1/devices/$DeviceId/event" in probe_source
-    assert "iot-health/v1/devices/$DeviceId/status" in probe_source
-    assert "$encodedPayload | & docker compose" in probe_source
-    assert "python -m edge.mqtt_auth_probe" in probe_source
-    assert "--base64" in probe_source
-    assert "*> $null" in probe_source
-    assert "--password" not in probe_source
-    param_block = probe_source.split("param(", 1)[1].split("\n)", 1)[0]
-    assert "$PSScriptRoot" not in param_block
-    assert "[string]::IsNullOrWhiteSpace($ProjectRoot)" in probe_source
-    probe_call = next(line for line in source.splitlines() if "Test-NodeMqttCredential.ps1" in line)
-    assert "-ProjectRoot" not in probe_call
-    assert "Credential/ACL firmware khong khop Mosquitto" in source
-    assert "SIMULATOR_MQTT_PASSWORD" in source
-
-
-@pytest.mark.parametrize(("filename", "action"), WRAPPERS.items())
-def test_bat_wrappers_are_thin_portable_and_preserve_exit_code(filename, action):
-    source = (ROOT / filename).read_text(encoding="utf-8")
-
-    assert "%~dp0IOT-HEALTH-EDGE.ps1" in source
-    assert f"-Action {action}" in source
-    assert 'if /i "%~1"=="--no-pause"' in source
-    assert 'set "FINAL_CODE=%ERRORLEVEL%"' in source
-    assert "exit /b %FINAL_CODE%" in source
-    assert "FORWARD_ARGS" in source
-    assert "%NO_PAUSE_ARG% %FORWARD_ARGS%" in source
-    assert "docker compose" not in source.lower()
-    assert "--target upload" not in source.lower()
-
-
-def test_software_action_has_no_firmware_or_serial_side_effects():
-    source = LAUNCHER.read_text(encoding="utf-8")
-    software_config = _function_source(
-        source, "Assert-SoftwareConfiguration", "Get-SingleDefineValue"
-    )
-    software_start = _function_source(source, "Start-SoftwareStack", "Get-PythonLauncher")
-    software_path = software_config + software_start
-
-    for forbidden in (
-        "SecretsFile",
-        "Get-Ch340Port",
-        "Get-PlatformIoCommand",
-        "Test-NodeMqttCredential",
-        "--target",
-        "upload",
-    ):
-        assert forbidden not in software_path
-
-
-def test_install_stop_and_logs_are_non_destructive_and_bounded():
-    source = LAUNCHER.read_text(encoding="utf-8")
-    compose_helper = _function_source(
-        source, "Get-ComposeBaseArguments", "Assert-DockerReady"
-    )
-    install = _function_source(source, "Install-System", "Get-PlatformIoCommand")
-    stop = _function_source(source, "Stop-System", "Show-SystemStatus")
-    logs = _function_source(source, "Show-SystemLogs", "try {")
-
-    assert "-not (Test-Path -LiteralPath $script:EnvFile)" in install
-    assert "-not (Test-Path -LiteralPath $script:SecretsFile)" in install
-    assert "-Force" not in install
-    assert "Invoke-NativeQuiet -FilePath $pioPython" in install
-    assert "'pip', 'install', 'platformio'" in install
-    assert "@('down')" in stop
-    assert "--volumes" not in stop
-    assert "Get-ComposeBaseArguments -UseEmptyEnv" in logs
-    assert "@('--env-file', 'NUL')" in compose_helper
-    assert "'--since', $Since, '--tail', $Tail.ToString()" in logs
-    assert "'mosquitto', 'edge'" in logs
-    assert "inspect" not in logs.lower()
-
-
-def test_hardware_auth_errors_are_classified_and_legacy_mode_keeps_old_no_com_path():
-    source = LAUNCHER.read_text(encoding="utf-8")
-    hardware = _function_source(source, "Start-HardwareStack", "Stop-System")
-    dispatch = source.split("switch ($Action)", 1)[1]
-
-    assert "$authExitCode -eq 16" in hardware
-    assert "$authExitCode -eq 17" in hardware
-    assert "MQTT auth probe khong hoan tat (exit 17)" in hardware
-    assert "MQTT auth probe gap loi noi bo" in hardware
-    assert "Get-Process -Name 'serial-monitor'" not in hardware
-    assert "Start-SoftwareStack -OpenDashboard" in hardware
-    assert "'StartLegacy' { Start-HardwareStack -AllowMissingHardware }" in dispatch
-
-
-@pytest.mark.parametrize(
-    (
-        "firmware_username",
-        "firmware_device_id",
-        "acl_device_id",
-        "extra_acl",
-        "expected_exit",
-    ),
-    [
-        ("health_node", "health-node-01", "health-node-01", "", 0),
-        ("health_node", "health-node-01", "different-node", "", 16),
-        ("health_edge", "health-node-01", "health-node-01", "", 16),
-        ("Health_Node", "health-node-01", "health-node-01", "", 16),
-        ("health_node", "Health-node-01", "Health-node-01", "", 16),
-        (
-            "health_node",
-            "health-node-01",
-            "health-node-01",
-            "topic write iot-health/v1/devices/+/status\n",
-            16,
-        ),
-        (
-            "health_node",
-            "health-node-01",
-            "health-node-01",
-            "topic write iot-health/v1/devices/health-node-01/status\n",
-            16,
-        ),
-    ],
-    ids=(
-        "exact-node-acl",
-        "wrong-device-acl",
-        "read-only-account",
-        "username-case-mismatch",
-        "uppercase-device-id",
-        "extra-wildcard-rule",
-        "duplicate-rule",
-    ),
-)
-def test_node_probe_rejects_acl_mismatch_before_live_handshake(
-    tmp_path,
-    firmware_username,
-    firmware_device_id,
-    acl_device_id,
-    extra_acl,
-    expected_exit,
-):
-    powershell = shutil.which("powershell.exe")
-    if powershell is None:
-        pytest.skip("Windows PowerShell is required for the launcher ACL check")
-
-    secrets = tmp_path / "firmware" / "health-node" / "include" / "secrets.h"
-    secrets.parent.mkdir(parents=True)
-    secrets.write_text(
-        f'#define DEVICE_ID "{firmware_device_id}"\n'
-        f'#define MQTT_USERNAME "{firmware_username}"\n'
-        '#define MQTT_PASSWORD "dummy-node-password"\n',
-        encoding="utf-8",
-    )
-    generated = tmp_path / "deploy" / "mosquitto" / "generated"
-    generated.mkdir(parents=True)
-    (generated / "acl").write_text(
-        "user health_edge\n"
-        "topic read iot-health/v1/devices/+/telemetry\n"
-        "user health_node\n"
-        f"topic write iot-health/v1/devices/{acl_device_id}/telemetry\n"
-        f"topic write iot-health/v1/devices/{acl_device_id}/event\n"
-        f"topic write iot-health/v1/devices/{acl_device_id}/status\n"
-        f"{extra_acl}",
-        encoding="utf-8",
-    )
-    (tmp_path / ".env").write_text("DUMMY=true\n", encoding="utf-8")
-    (tmp_path / "deploy" / "docker-compose.yml").write_text(
-        "services: {}\n", encoding="utf-8"
-    )
-    mock_bin = tmp_path / "mock-bin"
-    mock_bin.mkdir()
-    (mock_bin / "docker.cmd").write_text("@echo off\nexit /b 0\n", encoding="ascii")
-    environment = os.environ.copy()
-    environment["PATH"] = str(mock_bin) + os.pathsep + environment["PATH"]
-
-    completed = subprocess.run(
-        [
-            powershell,
-            "-NoLogo",
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            str(AUTH_PROBE_SCRIPT),
-            "-ProjectRoot",
-            str(tmp_path),
-        ],
-        check=False,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        env=environment,
-        timeout=10,
-    )
-
-    assert completed.returncode == expected_exit
-    assert "dummy-node-password" not in completed.stdout + completed.stderr
-
-
-@pytest.mark.parametrize(
-    "credential_defines",
-    [
-        '#define MQTT_USERNAME "health_node"\n'
-        '#define MQTT_USERNAME "health_node"\n'
-        '#define MQTT_PASSWORD "dummy-node-password"\n',
-        '#define MQTT_USERNAME "health_" "node"\n'
-        '#define MQTT_PASSWORD "dummy-node-password"\n',
-        '#define MQTT_USERNAME "health_node"\n'
-        '#define MQTT_PASSWORD "dummy\\npassword"\n',
-    ],
-    ids=("duplicate", "adjacent-literals", "escaped-literal"),
-)
-def test_node_probe_rejects_ambiguous_firmware_defines(tmp_path, credential_defines):
-    powershell = shutil.which("powershell.exe")
-    if powershell is None:
-        pytest.skip("Windows PowerShell is required for the launcher define check")
-
-    secrets = tmp_path / "firmware" / "health-node" / "include" / "secrets.h"
-    secrets.parent.mkdir(parents=True)
-    secrets.write_text(
-        '#define DEVICE_ID "health-node-01"\n'
-        + credential_defines,
-        encoding="utf-8",
-    )
-    generated = tmp_path / "deploy" / "mosquitto" / "generated"
-    generated.mkdir(parents=True)
-    (generated / "acl").write_text(
-        "user health_node\n"
-        "topic write iot-health/v1/devices/health-node-01/telemetry\n"
-        "topic write iot-health/v1/devices/health-node-01/event\n"
-        "topic write iot-health/v1/devices/health-node-01/status\n",
-        encoding="utf-8",
-    )
-    (tmp_path / ".env").write_text("DUMMY=true\n", encoding="utf-8")
-    (tmp_path / "deploy" / "docker-compose.yml").write_text(
-        "services: {}\n", encoding="utf-8"
-    )
-
-    completed = subprocess.run(
-        [
-            powershell,
-            "-NoLogo",
-            "-NoProfile",
-            "-ExecutionPolicy",
-            "Bypass",
-            "-File",
-            str(AUTH_PROBE_SCRIPT),
-            "-ProjectRoot",
-            str(tmp_path),
-        ],
-        check=False,
-        capture_output=True,
-        text=True,
-        encoding="utf-8",
-        timeout=10,
-    )
-
-    assert completed.returncode == 17
-    assert "dummy-node-password" not in completed.stdout + completed.stderr

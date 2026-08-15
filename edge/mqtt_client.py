@@ -8,6 +8,7 @@ from paho.mqtt import client as mqtt
 
 from .config import Settings
 from .db import utc_now
+from .schemas import DeviceCommand
 from .service import IngestionService
 
 
@@ -17,6 +18,7 @@ TOPIC_FILTERS = (
     "iot-health/v1/devices/+/event",
     "iot-health/v1/devices/+/status",
 )
+COMMAND_PUBLISH_TIMEOUT_SECONDS = 2.0
 
 
 class EdgeMqttClient:
@@ -71,6 +73,40 @@ class EdgeMqttClient:
             "subscribed": self.subscribed.is_set(),
             "last_error": self.last_error,
         }
+
+    def publish_command(
+        self,
+        command: DeviceCommand,
+        timeout_seconds: float = COMMAND_PUBLISH_TIMEOUT_SECONDS,
+    ) -> int:
+        """Publish one boot-scoped command and boundedly await its QoS 1 PUBACK."""
+        if timeout_seconds <= 0:
+            raise ValueError("timeout_seconds must be greater than zero")
+        if not self.connected.is_set() or not self.subscribed.is_set():
+            raise RuntimeError("MQTT command channel is not ready")
+        topic = (
+            f"iot-health/v1/devices/{command.device_id}/command/"
+            f"{command.target_boot_id}"
+        )
+        info = self.client.publish(
+            topic,
+            command.model_dump_json(by_alias=True),
+            qos=1,
+            retain=False,
+        )
+        if info.rc != mqtt.MQTT_ERR_SUCCESS:
+            self.last_error = f"MQTT command publish failed: rc={info.rc}"
+            raise RuntimeError(self.last_error)
+        try:
+            info.wait_for_publish(timeout=timeout_seconds)
+        except RuntimeError as exc:
+            self.last_error = f"MQTT command PUBACK failed: {exc}"
+            raise RuntimeError(self.last_error) from exc
+        if not info.is_published():
+            self.last_error = "MQTT command PUBACK timed out"
+            raise RuntimeError(self.last_error)
+        self.last_error = None
+        return int(info.mid)
 
     def _on_connect(
         self,

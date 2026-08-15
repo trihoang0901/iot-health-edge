@@ -48,13 +48,26 @@ Sau mỗi alert, ACK trên dashboard và xác nhận actor/note/thời điểm �
 - [ ] Kết nối anonymous thất bại.
 - [ ] `health_node` không đọc được telemetry và không ghi được device ID khác.
 - [ ] `health_edge` đọc được ba loại topic.
+- [ ] `health_edge` ghi được command subtree; `health_node` chỉ đọc được
+      `command/{boot_id}` của đúng `device_id`, không đọc command thiết bị khác.
+- [ ] Migration `Initialize-Mosquitto.ps1 -AclOnly` render/validate ACL tạm,
+      thay atomically, restart/probe thành công và không sửa hoặc tạo lại
+      password hash; lỗi probe rollback ACL cũ.
 - [ ] Không có `.env`, password file, khóa hoặc credential trong source/package bàn giao.
 - [ ] TCP 1883 chỉ mở trên profile/subnet LAN cần thiết.
 - [ ] Không forward TCP 1883 ra Internet.
-- [ ] Trong workflow broker local, launcher từ chối `MQTT_HOST` không thuộc
-      IPv4 non-loopback đang hoạt động và không in credential.
+- [ ] Launcher mặc định/`Start`/`Verify` không có đường upload và vẫn chạy khi
+      Wi-Fi/IP bootstrap trong `secrets.h` đã cũ; chỉ `Flash` kiểm tra bootstrap.
+- [ ] `Flash` chỉ upload application image, không gọi erase/upload filesystem
+      và giữ nguyên LittleFS committed sau nâng cấp.
+- [ ] Secret AP không xuất hiện trong argv/stdout/stderr/log; DPAPI chỉ giải mã
+      cho đúng Windows user và clipboard chỉ đổi khi bấm nút sao chép.
 
-## D. Phần cứng theo từng tầng
+## D. Phần cứng theo từng tầng — bằng chứng lịch sử
+
+Các dấu `[x]` có ghi `0.2.2` hoặc `0.3.1` dưới đây chỉ mô tả phiên bring-up lịch
+sử. Chúng không được dùng để đánh dấu nghiệm thu phần cứng `0.4.0`; ma trận mới
+ở mục H hiện vẫn **CHƯA XÁC NHẬN**.
 
 ### D1. Current acceptance `0.4.0` / telemetry v4
 
@@ -176,3 +189,49 @@ Các dấu `[x]` bên dưới thuộc các lần bring-up `0.2.2`/`0.3.1`; chún
 - [ ] Mô phỏng timeout, HTTP 429/5xx, 4xx vĩnh viễn và queue đầy không làm MQTT,
   SQLite, dashboard hoặc ingestion worker lỗi.
 - [ ] Log/metrics không chứa token, Chat ID, URL chứa token hoặc body phản hồi.
+
+## H. Nghiệm thu phục hồi mạng firmware `0.4.0` — CHƯA XÁC NHẬN
+
+Trước khi chạy, ghi source commit, firmware `0.4.0`, boot ID, hai telemetry
+đầu/cuối, counter edge trước/sau và evidence đã khử nhạy cảm. Không ghi SSID,
+password, hostname/IP thô hoặc credential. Bằng chứng `0.3.1` lịch sử không
+được thay thế cho bất kỳ mục nào dưới đây.
+
+- [ ] Native/unit tests qua cho thứ tự last-good/priority, timeout 8 giây mỗi
+      profile, full-sweep backoff `1..30 s`, DNS/fallback, auth failure,
+      `millis()` rollover, portal deadline và candidate commit/rollback.
+- [ ] Power-loss test qua tại mọi bước temp-file/rename/promote: boot luôn chọn
+      committed hợp lệ generation cao nhất, không format LittleFS và không mất
+      cấu hình committed.
+- [ ] Portal test qua cho CSRF one-time, body `>4096` bị từ chối, HTML escaping,
+      giữ password khi ô trống, xóa profile bằng thao tác riêng, duplicate
+      profile/fallback sai subnet bị từ chối và request không kéo dài deadline.
+- [ ] Command test qua cho sai boot/device/session, expiry wrap-safe, duplicate,
+      retained replay và cross-device deny. Publisher luôn QoS 1,
+      `retain=false`; PUBACK không được ghi là execution success.
+- [ ] `OpenPortal` chỉ hoạt động sau heartbeat trực tiếp non-retained còn mới;
+      launcher nhận HTTP 202 rồi chỉ success khi thấy `provisioning_started`
+      đúng `correlation_id`. Node offline phải fail rõ ràng.
+- [ ] Chuyển Wi-Fi A→B và B→A: cùng boot ID, ít nhất hai telemetry mới trong
+      `<=60 s`, seq tăng và edge `rejected`/`processing_errors` không tăng.
+- [ ] Laptop đổi DHCP IP nhưng hostname giữ nguyên: node resolve endpoint mới,
+      online lại trong `<=60 s`, không USB/reflash, recovery reason là
+      `recovered_broker_ip_change` khi phù hợp.
+- [ ] DNS hỏng: chỉ fallback IPv4 thuộc subnet của đúng profile được dùng và
+      ghi `recovered_dns_fallback`; fallback không che auth denied.
+- [ ] Wi-Fi candidate sai: trial thất bại, committed cũ được phục hồi và portal
+      chỉ mở lại trong phần deadline còn lại.
+- [ ] Mất điện trong candidate trial: committed cũ còn nguyên sau boot.
+- [ ] Mất toàn bộ mạng: portal xuất hiện `45±5 s`, hard-close `300±5 s`; request
+      hoặc save lỗi không gia hạn. Reset/power-cycle tạo cửa sổ mới.
+- [ ] CONNACK `3` chỉ retry MQTT; CONNACK `1/2/4/5` không roam và không mở
+      portal, đồng thời hiển thị lỗi cấu hình/xác thực phù hợp.
+- [ ] Sau phục hồi không burst telemetry cũ; mẫu đầu là số đo mới và tốc độ
+      không vượt steady-state ngoài sai số một mẫu. Event queue RAM giới hạn
+      hiện tại vẫn giữ semantics cũ.
+- [ ] Dashboard giữ “Phục hồi gần nhất” qua các heartbeat sau đó và chỉ render
+      reason nằm trong mapping tiếng Việt, không render chuỗi lạ trực tiếp.
+- [ ] Portal có free heap `>=15 KB`; heap sau đóng trở về gần baseline và soak
+      15 phút không WDT/reset.
+- [ ] Kết thúc ma trận: node vật lý online, dashboard có telemetry mới của
+      firmware `0.4.0`; ghi rõ đây vẫn là prototype phi lâm sàng.

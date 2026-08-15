@@ -214,7 +214,10 @@ class IngestionService:
                     if disposition != "accepted":
                         return self._disposition_result(kind, disposition)
                     self.database.update_status(
-                        status, message.received_at, connection=connection
+                        status,
+                        message.received_at,
+                        retained=message.retain,
+                        connection=connection,
                     )
 
             self._increment("accepted")

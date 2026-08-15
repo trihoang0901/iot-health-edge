@@ -9,6 +9,7 @@
 secrets.h
 secrets.*.h
 !secrets.example.h
+provisioning_secret.h
 secrets*.json
 !secrets.example.json
 credentials*.json
@@ -65,5 +66,4 @@ evidence/final/*
 Thumbs.db
 desktop.ini
 ~$*.docx
-
 deliverables/

@@ -1,44 +1,5 @@
 # Quickstart trên Windows
 
-## Cách khuyến nghị: launcher tách theo nhiệm vụ
-
-Từ thư mục dự án, chạy một lần:
-
-```powershell
-.\INSTALL-IOT-HEALTH-EDGE.bat
-```
-
-Installer kiểm tra Docker/Python, chuẩn bị `.venv` và PlatformIO cục bộ, chỉ
-tạo `.env`/`secrets.h` khi chưa có, đồng thời khởi tạo Mosquitto theo kiểu nhập
-mật khẩu tương tác khi chưa có credential. Nó không ghi đè file hoặc mật khẩu
-hiện hữu. Installer không tự cài Docker Desktop, Python hoặc driver USB/CH340.
-Sau đó mở `.env` và `secrets.h` để thay các giá trị mẫu; không gửi nội dung hai
-file này qua chat hoặc ảnh chụp.
-
-Vận hành hằng ngày:
-
-```powershell
-.\START-SOFTWARE.bat
-.\STATUS-IOT-HEALTH-EDGE.bat
-.\LOGS-IOT-HEALTH-EDGE.bat
-.\STOP-IOT-HEALTH-EDGE.bat
-```
-
-`START-SOFTWARE.bat` không đọc cấu hình firmware, không dò CH340/PlatformIO và
-không upload. Khi đã cắm NodeMCU và chủ động muốn build/upload, dùng:
-
-```powershell
-.\START-HARDWARE.bat
-```
-
-Tên cũ `START-IOT-HEALTH-EDGE.bat` vẫn giữ hành vi tương thích: nếu không thấy
-CH340 thì khởi động software và bỏ qua upload. File mới
-`START-HARDWARE.bat` fail-closed khi thiếu board/PlatformIO. Mỗi wrapper nhận
-`--no-pause` ở bất kỳ vị trí nào; logs còn nhận `-Tail` và `-Since`, ví dụ
-`.\LOGS-IOT-HEALTH-EDGE.bat -Tail 50 -Since 5m --no-pause`. Action logs chỉ đọc
-hai service `edge`/`mosquitto` trong cửa sổ giới hạn và không nạp `.env`. Các
-phần bên dưới là quy trình thủ công để hiểu hoặc xử lý từng thành phần.
-
 ## 1. Chuẩn bị
 
 - Docker Desktop ở trạng thái Running.
@@ -176,16 +137,13 @@ Ngưỡng demo có khoảng giữ mặc định nên `low_spo2`/`high_hr` cần 
 6. Với broker local trên laptop, chạy launcher một chạm:
 
    ```powershell
-   .\START-HARDWARE.bat
+   .\START-IOT-HEALTH-EDGE.bat
    ```
 
-   `START-IOT-HEALTH-EDGE.bat` là tên tương thích có thêm nhánh bỏ qua upload
-   khi thiếu CH340. Launcher hardware kiểm tra bí mật theo trạng thái (không in
-   giá trị), yêu cầu
-   `MQTT_HOST` là một IPv4 non-loopback đang hoạt động trên laptop, khởi động
-   Docker, tự tìm CH340 và nạp firmware nếu có NodeMCU. Nếu báo
-   `MQTT_HOST ... khong khop`, cập nhật IP trong `secrets.h` rồi chạy lại;
-   launcher dừng trước khi upload.
+   Mode mặc định `Start` chỉ kiểm tra cấu hình runtime, khởi động Docker và xác
+   nhận dữ liệu mới; nó không đọc bootstrap `secrets.h`, không tìm COM và không
+   nạp firmware. Chỉ chạy mode `Flash` khi chủ động nâng firmware lần đầu hoặc
+   rollback có kiểm soát.
 7. Nếu nạp thủ công, chạy trong `firmware\health-node`:
 
    ```powershell
@@ -194,19 +152,15 @@ Ngưỡng demo có khoảng giữ mặc định nên `low_spo2`/`high_hr` cần 
    pio device monitor --baud 115200
    ```
 
-8. Source hiện tại là firmware `0.4.0` và phát `health.telemetry.v4`. Sau mỗi
-   lần nạp, chỉ coi rollout đạt khi API nhận telemetry mới cùng boot với
-   `system.fw="0.4.0"`, schema v4, `seq` tăng và thiết bị `online=true`. Nếu
-   thấy `0.3.1`/v3 thì NodeMCU vẫn chạy image lịch sử. Source `0.4.0` mới chỉ
-   được build/test tự động trong worktree này; physical run vẫn
-   **`NOT_VERIFIED`**.
-
-   Bằng chứng lịch sử 2026-08-14: Serial boot `a164b119f1fd90b3` báo firmware
-   `0.3.1`, `wifi_connected ip=192.168.137.37` và `mqtt_connected`; API nhận
-   v3 tại `seq=23/25/28`, nhiệt độ `27.3125 °C`, motion hợp lệ/`idle` và
-   `sensor_faults=[]`. Máy Windows của phiên thử đã rollback driver CH340 từ
+8. Bằng chứng phần cứng lịch sử là firmware `0.3.1` đã được upload trong phiên
+   bring-up 2026-08-14; source hiện tại `0.4.0` chưa được nghiệm thu lại trên
+   node vật lý. Sau hard reset lịch sử, Serial boot `a164b119f1fd90b3` báo firmware
+   `0.3.1`, `wifi_connected ip=192.168.137.37` và `mqtt_connected`. API nhận
+   `health.telemetry.v3` tại `seq=23/25/28`, nhiệt độ `27.3125 °C`, motion
+   hợp lệ/`idle` và `sensor_faults=[]`. Máy Windows của phiên thử đã rollback driver CH340 từ
    `3.9.2024.9` xuống `3.7.2022.1`; không tự áp dụng rollback này trên máy khác
-   nếu COM/upload vẫn hoạt động. Bằng chứng này không xác nhận gate v4.
+   nếu COM/upload vẫn hoạt động. Mỗi lần nạp sau vẫn phải xác nhận telemetry mới
+   có `system.fw="0.3.1"`, `seq` tăng và thiết bị `online=true`.
 9. Với cảm biến chuyển động, I2C scanner phải thấy địa chỉ `0x68`, nhưng ACK
    này chưa phải kết quả đạt. Đọc tiếp `WHO_AM_I` (`0x75`): `0x68` là
    MPU-6050, `0x70` là MPU-6500-compatible. Sau đó xác nhận đọc đủ 14 byte từ
@@ -219,21 +173,17 @@ Ngưỡng demo có khoảng giữ mặc định nên `low_spo2`/`high_hr` cần 
     `OVF_COUNTER`, nhưng vẫn
     fail-closed nếu khoảng lấy mẫu vượt `250 ms` hoặc SparkFun `check()` fetch
     từ bốn mẫu. Chỉ đánh dấu HR/SpO₂ đạt sau khi telemetry cuối có giá trị và cờ
-    hợp lệ đúng; raw quang học riêng lẻ chưa đủ. Xem
-    [quy trình chất lượng/hiệu chỉnh PPG](ppg-quality-gate.md): dùng kẹp phẳng,
-    che sáng, lực ép lặp lại, giữ tay/dây cố định và đo ở ngón tay; không suy
-    diễn kết quả ngón tay thành đo cổ tay khi vận động.
+    hợp lệ đúng; raw quang học riêng lẻ chưa đủ.
 11. DS18B20 phải ở powered three-wire: VDD=3V3, GND chung, DATA=D5/GPIO14 và
-    pull-up ngoài 4,7 kΩ từ DATA lên 3V3. Source `0.4.0` giữ pull-up nội yếu
+    pull-up ngoài 4,7 kΩ từ DATA lên 3V3. Source `0.3.1` bật thêm pull-up nội yếu
     như fallback prototype và yêu cầu chuyển đổi 12-bit bất đồng bộ rồi đọc sau
     ít nhất `750 ms`; không chờ bằng `delay(750)`. Scanner A/B của phiên thử
     không tìm thấy ROM ở `external_only`, nhưng nhánh có fallback pull-up nội
     tìm được family `0x28`, CRC hợp lệ, powered và `27.3125 °C`. Kết quả này
-    không cho phép bỏ điện trở ngoài trên wearable. Khi cảm biến lỗi, v4 vẫn
+    không cho phép bỏ điện trở ngoài trên wearable. Khi cảm biến lỗi, v3 vẫn
     phải phát `wearable.wrist_surface_temp_c=null`,
     `quality.wrist_surface_temp_valid=false`, fault `ds18b20_unavailable` và
-    duy trì MAX30102, dual-MPU cùng MQTT. Ở phiên lịch sử `0.3.1` sau hard
-    reset, MAX30102 không còn
+    duy trì MAX30102, dual-MPU cùng MQTT. Sau hard reset, MAX30102 không còn
     unavailable hoặc `ppg_sample_loss`; chưa đặt ngón tay nên HR/SpO₂ là `null`
     đúng fail-closed và vẫn cần retest ngón tay riêng. Dashboard đã hiển thị
     online, nhiệt độ `27.3 °C` hợp lệ, firmware `0.3.1` và không có lỗi trình
@@ -248,10 +198,58 @@ Không cần buzzer hoặc nút để hoàn thành MVP. Nếu thêm về sau, ch
 ## 7. Dừng dịch vụ
 
 ```powershell
-.\STOP-IOT-HEALTH-EDGE.bat
+docker compose -f .\deploy\docker-compose.yml --profile full down
 ```
 
-Lệnh trên gọi Compose `down` và giữ các Docker volume `mosquitto-data` và
-`edge-data`. Chỉ thêm
+Lệnh trên giữ các Docker volume `mosquitto-data` và `edge-data`. Chỉ thêm
 `--volumes` khi chủ động muốn mất toàn bộ dữ liệu Mosquitto và SQLite; không
 cần làm trong vận hành bình thường.
+
+## 8. Launcher phục hồi mạng
+
+File BAT chỉ chuyển tiếp sang Windows PowerShell 5.1. Mode mặc định là `Start`:
+
+```powershell
+.\START-IOT-HEALTH-EDGE.bat Start -NoPause
+.\START-IOT-HEALTH-EDGE.bat Doctor -NoPause
+.\START-IOT-HEALTH-EDGE.bat Verify -NoPause
+```
+
+- `Start` khởi động stack, chờ API healthy và kiểm tra telemetry mới. Mode này
+  không đọc `secrets.h`, không cần COM/USB và không nạp firmware; vì vậy Wi-Fi
+  hoặc IP bootstrap đã cũ không ngăn stack khởi động.
+- `Doctor` kiểm tra cú pháp endpoint, DNS trên Windows, TCP 1883, MQTT
+  authentication và ACL. Kết quả DNS Windows không chứng minh ESP8266 cũng
+  phân giải được hostname trên mạng đang dùng. Riêng probe ACL dùng MQTT v5 để
+  đọc PUBACK reason `Not authorized`; firmware vận hành vẫn dùng MQTT 3.1.1.
+- `Verify` chạy bộ kiểm chứng và build firmware, không cần COM/USB.
+- `Flash` là mode duy nhất được phép upload. Mode này kiểm tra bootstrap,
+  tự tìm CH340 (hoặc nhận `-Port COMx`), sinh secret AP nếu chưa có và chỉ nạp
+  application image; không erase hoặc upload LittleFS.
+
+Lần nâng cấp đầu tiên có chủ đích:
+
+```powershell
+.\START-IOT-HEALTH-EDGE.bat Flash -Port COM5 -NoPause
+```
+
+Sau đó cấu hình Wi-Fi/broker bằng captive portal. Khi node vẫn online, yêu cầu
+mở portal từ xa bằng lệnh sau. Launcher chỉ báo thành công sau khi edge xác
+nhận status trực tiếp, gửi command QoS 1 `retain=false`, và nhận receipt
+`provisioning_started` đúng correlation ID:
+
+```powershell
+.\START-IOT-HEALTH-EDGE.bat OpenPortal -NoPause
+```
+
+Nếu node đã mất Wi-Fi/MQTT thì lệnh từ xa không thể tới node. Chờ portal tự mở
+sau khoảng 45 giây, hoặc reset/power-cycle để tạo cửa sổ portal mới sau khi cửa
+sổ cũ hết hạn. Xem mật khẩu AP trong cửa sổ cục bộ:
+
+```powershell
+.\START-IOT-HEALTH-EDGE.bat ShowPortalAccess -NoPause
+```
+
+Secret được mã hóa DPAPI theo user Windows. Nó không được in ra terminal/log
+hay đưa vào tham số tiến trình; clipboard chỉ thay đổi khi người dùng bấm nút
+**Sao chép** trong cửa sổ.

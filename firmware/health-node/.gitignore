@@ -1,5 +1,6 @@
 .pio/
 .vscode/
 include/secrets.h
+include/provisioning_secret.h
 *.log
 *.exe

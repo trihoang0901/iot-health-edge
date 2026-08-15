@@ -154,6 +154,25 @@ def test_dashboard_exposes_protocol_experiment_and_accessible_chart_regions():
     assert "typicalInterval * 1.5" in script
 
 
+def test_dashboard_maps_recovery_codes_without_rendering_unknown_raw_values():
+    _parser, html = parse_dashboard()
+    script = (STATIC_DIR / "app.js").read_text(encoding="utf-8")
+
+    assert 'id="last-recovery"' in html
+    assert "Phục hồi gần nhất" in html
+    for reason in (
+        "recovered_provisioning",
+        "recovered_wifi_profile",
+        "recovered_broker_ip_change",
+        "recovered_dns_fallback",
+        "recovered_mqtt_transport",
+    ):
+        assert reason in script
+    assert "Object.hasOwn(recoveryReasonLabels, device.last_recovery_reason)" in script
+    assert '"lý do không xác định"' in script
+    assert "${device.last_recovery_reason}" not in script
+
+
 def test_dashboard_guards_request_races_and_uses_deep_linked_state():
     _parser, _html = parse_dashboard()
     script = (STATIC_DIR / "app.js").read_text(encoding="utf-8")

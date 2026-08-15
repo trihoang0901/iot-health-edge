@@ -2,11 +2,13 @@ from __future__ import annotations
 
 import json
 import math
+from uuid import UUID
 
 import pytest
 from pydantic import ValidationError
 
 from edge.schemas import (
+    DeviceCommand,
     DeviceStatus,
     FallEvent,
     Telemetry,
@@ -390,6 +392,55 @@ def test_event_and_status_contracts():
 
     assert event.type == "fall_suspected_demo"
     assert status.online is False
+
+
+def test_status_and_command_contract_carry_strict_uuid_session_and_correlation():
+    command_session_id = "3bd40a56-6e62-4bdf-9b1e-74f8611dcd5a"
+    correlation_id = "d442ba67-ab7f-4260-880d-3eb2f03ae0bf"
+    status = DeviceStatus.model_validate(
+        {
+            "schema": "health.status.v1",
+            "device_id": "health-node-01",
+            "boot_id": "boot-1",
+            "seq": 9,
+            "uptime_ms": 9000,
+            "online": True,
+            "reason": "provisioning_started",
+            "command_session_id": command_session_id,
+            "correlation_id": correlation_id,
+            "system": {
+                "rssi_dbm": -60,
+                "free_heap": 30000,
+                "fw": "0.4.0",
+                "faults": [],
+            },
+        }
+    )
+    command = DeviceCommand.model_validate(
+        {
+            "schema": "health.command.v1",
+            "device_id": "health-node-01",
+            "target_boot_id": "boot-1",
+            "command_id": correlation_id,
+            "command_session_id": command_session_id,
+            "action": "open_provisioning",
+            "expires_uptime_ms": 39000,
+        }
+    )
+
+    assert status.command_session_id == UUID(command_session_id)
+    assert status.correlation_id == command.command_id == UUID(correlation_id)
+    assert command.model_dump(mode="json", by_alias=True)["schema"] == (
+        "health.command.v1"
+    )
+
+    with pytest.raises(ValidationError):
+        DeviceCommand.model_validate(
+            {
+                **command.model_dump(mode="json", by_alias=True),
+                "command_session_id": "not-a-uuid",
+            }
+        )
 
 
 def test_topic_contract_is_exact():

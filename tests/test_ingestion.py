@@ -48,11 +48,12 @@ def make_service(
     )
 
 
-def message(kind, payload, received=None):
+def message(kind, payload, received=None, *, retain=None):
     return InboundMessage(
         topic=f"iot-health/v1/devices/{payload['device_id']}/{kind}",
         payload=json.dumps(payload).encode(),
         received_at=received or datetime(2026, 8, 4, 12, 0, tzinfo=UTC),
+        retain=retain,
     )
 
 
@@ -427,6 +428,123 @@ def test_status_updates_online_state(tmp_path):
     device = database.get_device("health-node-01")
     assert device["online"] is False
     assert device["status_reason"] == "lwt"
+
+
+def test_heartbeat_preserves_transition_recovery_and_command_receipt(tmp_path):
+    database, service = make_service(tmp_path)
+    start = datetime(2026, 8, 4, 12, 0, tzinfo=UTC)
+    session_id = "3bd40a56-6e62-4bdf-9b1e-74f8611dcd5a"
+    command_id = "d442ba67-ab7f-4260-880d-3eb2f03ae0bf"
+
+    def status(seq, reason, *, correlation_id=None):
+        payload = {
+            "schema": "health.status.v1",
+            "device_id": "health-node-01",
+            "boot_id": "boot-1",
+            "seq": seq,
+            "uptime_ms": seq * 1000,
+            "online": True,
+            "reason": reason,
+            "command_session_id": session_id,
+            "system": {
+                "rssi_dbm": -60,
+                "free_heap": 30000,
+                "fw": "0.4.0",
+                "faults": [],
+            },
+        }
+        if correlation_id is not None:
+            payload["correlation_id"] = correlation_id
+        return payload
+
+    assert service.process_message(
+        message(
+            "status",
+            status(10, "recovered_mqtt_transport"),
+            start,
+            retain=False,
+        )
+    ).accepted
+    assert service.process_message(
+        message(
+            "status",
+            status(11, "provisioning_started", correlation_id=command_id),
+            start + timedelta(seconds=1),
+            retain=False,
+        )
+    ).accepted
+    assert service.process_message(
+        message(
+            "status",
+            status(12, "heartbeat"),
+            start + timedelta(seconds=2),
+            retain=False,
+        )
+    ).accepted
+
+    device = database.get_device("health-node-01")
+    assert device["status_reason"] == "provisioning_started"
+    assert device["status_reason_at"] == "2026-08-04T12:00:01.000Z"
+    assert device["last_recovery_reason"] == "recovered_mqtt_transport"
+    assert device["last_recovery_at"] == "2026-08-04T12:00:00.000Z"
+    assert device["last_status_at"] == "2026-08-04T12:00:02.000Z"
+    assert device["last_status_reason"] == "heartbeat"
+    assert device["last_status_retained"] is False
+    assert device["command_session_id"] == session_id
+    assert device["correlation_id"] == command_id
+
+
+@pytest.mark.parametrize(
+    "recovery_reason",
+    [
+        "recovered_provisioning",
+        "recovered_wifi_profile",
+        "recovered_broker_ip_change",
+        "recovered_dns_fallback",
+        "recovered_mqtt_transport",
+    ],
+)
+def test_recovery_status_starts_new_connection_epoch_for_lwt_matching(
+    tmp_path, recovery_reason
+):
+    database, service = make_service(tmp_path)
+    start = datetime(2026, 8, 4, 12, 0, tzinfo=UTC)
+    online = {
+        "schema": "health.status.v1",
+        "device_id": "health-node-01",
+        "boot_id": "boot-1",
+        "seq": 20,
+        "uptime_ms": 20000,
+        "online": True,
+        "reason": recovery_reason,
+        "command_session_id": "3bd40a56-6e62-4bdf-9b1e-74f8611dcd5a",
+        "system": {
+            "rssi_dbm": -60,
+            "free_heap": 30000,
+            "fw": "0.4.0",
+            "faults": [],
+        },
+    }
+    lwt = {
+        **online,
+        "seq": 19,
+        "online": False,
+        "reason": "mqtt_lost",
+        "system": {
+            "rssi_dbm": None,
+            "free_heap": None,
+            "fw": "0.4.0",
+            "faults": [],
+        },
+    }
+
+    assert service.process_message(message("status", online, start)).accepted
+    result = service.process_message(
+        message("status", lwt, start + timedelta(seconds=1), retain=True)
+    )
+
+    assert result.disposition == "accepted"
+    assert database.get_device("health-node-01")["online"] is False
 
 
 def test_unknown_offline_lwt_is_stale_and_does_not_create_device(tmp_path):

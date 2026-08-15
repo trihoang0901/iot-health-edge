@@ -2,6 +2,8 @@
 
 // Copy this file to include/secrets.h, then fill in local values.
 // include/secrets.h is intentionally ignored by Git.
+// Provisioning uses a different ignored file: copy
+// include/provisioning_secret.example.h to include/provisioning_secret.h.
 #define WIFI_SSID "your-hotspot-name"
 #define WIFI_PASSWORD "your-hotspot-password"
 

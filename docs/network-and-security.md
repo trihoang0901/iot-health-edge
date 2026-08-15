@@ -100,28 +100,16 @@ pháp Alternate-Marking của RFC này.
 3. Windows network profile nên là Private.
 4. Chỉ mở firewall TCP 1883 cho subnet cần thiết.
 5. Không dùng `localhost`/`127.0.0.1` trong firmware.
-6. Nếu IP thay đổi sau mỗi lần bật hotspot, cập nhật `MQTT_HOST` trong
-   `firmware/health-node/include/secrets.h` **và nạp lại firmware**, hoặc dùng
-   DHCP reservation/DNS nội bộ phù hợp.
+6. Sau lần flash firmware phục hồi mạng, cấu hình broker bằng hostname DNS dùng
+   được trên mọi profile hoặc fallback IPv4 riêng đúng subnet. IP thay đổi không
+   còn yêu cầu sửa `secrets.h` và nạp lại; bootstrap chỉ dùng khi LittleFS chưa
+   có cấu hình committed.
 7. Xác nhận hotspot có SSID 2,4 GHz mà ESP8266 nhìn thấy; không nhầm 5G di động với Wi-Fi 5 GHz.
 
-Trong workflow broker local, `START-HARDWARE.bat` và launcher tương thích
-`START-IOT-HEALTH-EDGE.bat` đều fail-closed về cấu hình nếu
-`MQTT_HOST` không phải IPv4 non-loopback đang hoạt động trên laptop. Gate này
-chạy trước Docker/upload và chỉ báo trạng thái, không in credential. Nó cố ý
-không áp dụng cho broker đầu xa; triển khai remote phải dùng quy trình riêng và
-đáp ứng yêu cầu TLS/VPN bên dưới, không vô hiệu hóa gate bằng một địa chỉ giả.
-
-Khác biệt duy nhất khi không phát hiện CH340: tên tương thích vẫn khởi động
-software và skip upload như trước đây; `START-HARDWARE.bat` mới dừng với lỗi để
-người vận hành không tưởng rằng board đã được nạp.
-
-`START-SOFTWARE.bat` là đường vận hành dashboard an toàn: action này không đọc
-`secrets.h`, không dò cổng COM và không gọi PlatformIO/upload.
-
-`LOGS-IOT-HEALTH-EDGE.bat` dùng một env file rỗng tường minh để Compose không
-tự nạp `.env`; wrapper chỉ lấy log giới hạn của `edge` và `mosquitto`. Dù vậy,
-không ghi secret vào message log và không chia sẻ log chưa rà soát.
+Trong workflow mới, `Start` và `Verify` chấp nhận bootstrap Wi-Fi/IP đã cũ và
+không có đường upload. `Flash` mới fail-closed nếu bootstrap thiếu, còn `Doctor`
+kiểm tra DNS/TCP/auth/ACL runtime và chỉ báo trạng thái, không in credential.
+Triển khai broker đầu xa vẫn phải đáp ứng yêu cầu TLS/VPN bên dưới.
 
 ## Mô hình bảo mật MVP
 
@@ -152,3 +140,28 @@ Telegram là kênh best-effort, không phải cơ chế báo động hoặc cấ
 ## TLS và ESP8266
 
 Kết nối Internet trực tiếp phải có mã hóa, xác minh hostname/CA và quản lý chứng chỉ. ESP8266 có RAM hạn chế; TLS có thể làm giảm heap và gây reset nếu ghép với buffer cảm biến/MQTT lớn. Vì vậy cần kiểm thử trên đúng firmware, không dùng chế độ bỏ kiểm tra chứng chỉ và không coi VPN là thay thế cho kiểm soát ACL. Nếu chưa hoàn tất bài test này, giữ broker trong LAN/VPN riêng và ghi rõ giới hạn.
+
+## Phục hồi Wi-Fi và captive portal
+
+Firmware mới giữ tối đa ba profile Wi-Fi và endpoint broker trong LittleFS theo
+cơ chế committed/candidate. `secrets.h` chỉ là bootstrap cho lần flash đầu;
+`Start` và `Verify` không được dùng giá trị Wi-Fi/IP cũ trong file đó làm gate.
+Chỉ `Flash` bắt buộc bootstrap hợp lệ.
+
+Mật khẩu AP provisioning dài 20 ký tự được launcher sinh bằng RNG mật mã. Bản
+đưa vào firmware nằm trong header local bị Git bỏ qua; bản phía laptop nằm
+trong `deploy/mosquitto/generated/portal-access.dpapi`, được DPAPI bảo vệ theo
+user Windows. Không gửi file DPAPI/header này và không đưa secret vào argv,
+stdout, stderr hay log. `ShowPortalAccess` chỉ sao chép khi người dùng chủ động
+bấm nút trong WinForms.
+
+`OpenPortal` không publish MQTT trực tiếp từ launcher. Edge phải thấy status
+sống, không-retained và nonce của đúng boot trước khi chấp nhận request; command
+được gửi QoS 1, `retain=false`. PUBACK không phải bằng chứng portal đã mở:
+launcher tiếp tục chờ `provisioning_started` có đúng correlation ID. Khi node
+đã offline khỏi Wi-Fi/MQTT, chỉ reset/power-cycle hoặc cơ chế tự mở portal cục
+bộ mới có thể cứu cấu hình.
+
+Portal chỉ dùng để quản lý profile Wi-Fi và hostname/IP broker. MQTT credential
+không đi qua portal. Broker 1883 vẫn là plaintext cho LAN tin cậy; khả năng tự
+phục hồi endpoint không làm thay đổi ranh giới bảo mật này.
