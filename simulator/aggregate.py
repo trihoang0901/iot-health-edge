@@ -471,7 +471,7 @@ def validate_completed_run(
 
     device_id = _string(manifest, "device_id", DEVICE_ID_RE)
     boot_id = _string(manifest, "boot_id", BOOT_ID_RE)
-    _exact_string(manifest, "schema", "health.telemetry.v3")
+    _exact_string(manifest, "schema", "health.telemetry.v4")
     _exact_string(
         manifest,
         "topic_namespace",

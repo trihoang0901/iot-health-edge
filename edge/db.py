@@ -9,7 +9,14 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any, Iterator, Literal
 
-from .schemas import DeviceStatus, Telemetry, TelemetryMessage, TelemetryV2, TelemetryV3
+from .schemas import (
+    DeviceStatus,
+    Telemetry,
+    TelemetryMessage,
+    TelemetryV2,
+    TelemetryV3,
+    TelemetryV4,
+)
 
 
 ACTIVE_STATES = ("open", "acknowledged")
@@ -141,7 +148,9 @@ class Database:
                     uptime_ms INTEGER NOT NULL,
                     received_at TEXT NOT NULL,
                     schema_version TEXT NOT NULL DEFAULT 'health.telemetry.v1',
+                    heart_rate_raw_bpm REAL,
                     heart_rate_bpm REAL,
+                    spo2_raw_pct REAL,
                     spo2_pct REAL,
                     skin_temp_c REAL,
                     ambient_temp_c REAL,
@@ -151,6 +160,7 @@ class Database:
                     gyro_dps REAL,
                     fall_state TEXT NOT NULL,
                     ppg REAL,
+                    ppg_state TEXT NOT NULL DEFAULT 'legacy',
                     finger_present INTEGER NOT NULL,
                     motion_artifact INTEGER NOT NULL,
                     heart_rate_valid INTEGER NOT NULL,
@@ -274,12 +284,33 @@ class Database:
             ("humidity_valid", "INTEGER NOT NULL DEFAULT 0"),
             ("wrist_surface_temp_c", "REAL"),
             ("wrist_surface_temp_valid", "INTEGER NOT NULL DEFAULT 0"),
+            ("heart_rate_raw_bpm", "REAL"),
+            ("spo2_raw_pct", "REAL"),
+            ("ppg_state", "TEXT NOT NULL DEFAULT 'legacy'"),
         )
         for name, declaration in additions:
             if name not in columns:
                 connection.execute(
                     f"ALTER TABLE telemetry ADD COLUMN {name} {declaration}"  # noqa: S608
                 )
+        connection.execute(
+            """
+            UPDATE telemetry
+            SET heart_rate_raw_bpm = heart_rate_bpm,
+                spo2_raw_pct = spo2_pct,
+                ppg_state = 'legacy'
+            WHERE schema_version IN (
+                'health.telemetry.v1',
+                'health.telemetry.v2',
+                'health.telemetry.v3'
+            )
+              AND (
+                  heart_rate_raw_bpm IS NOT heart_rate_bpm
+                  OR spo2_raw_pct IS NOT spo2_pct
+                  OR ppg_state IS NOT 'legacy'
+              )
+            """
+        )
 
     @staticmethod
     def _migrate_device_session_columns(connection: sqlite3.Connection) -> None:
@@ -773,6 +804,14 @@ class Database:
         connection: sqlite3.Connection | None = None,
     ) -> tuple[int | None, bool]:
         received_at = isoformat_utc(received)
+        if isinstance(telemetry, TelemetryV4):
+            heart_rate_raw_bpm = telemetry.vitals.heart_rate_raw_bpm
+            spo2_raw_pct = telemetry.vitals.spo2_raw_pct
+            ppg_state = telemetry.quality.ppg_state
+        else:
+            heart_rate_raw_bpm = telemetry.vitals.heart_rate_bpm
+            spo2_raw_pct = telemetry.vitals.spo2_pct
+            ppg_state = "legacy"
         if isinstance(telemetry, Telemetry):
             skin_temp_c = telemetry.vitals.skin_temp_c
             skin_temp_valid = telemetry.quality.skin_temp_valid
@@ -791,7 +830,7 @@ class Database:
             humidity_valid = telemetry.quality.humidity_valid
             wrist_surface_temp_c = None
             wrist_surface_temp_valid = False
-        elif isinstance(telemetry, TelemetryV3):
+        elif isinstance(telemetry, (TelemetryV3, TelemetryV4)):
             skin_temp_c = None
             skin_temp_valid = False
             ambient_temp_c = None
@@ -818,16 +857,18 @@ class Database:
                 """
                 INSERT INTO telemetry (
                     device_id, boot_id, seq, uptime_ms, received_at, schema_version,
-                    heart_rate_bpm, spo2_pct, skin_temp_c, ambient_temp_c, humidity_pct,
+                    heart_rate_raw_bpm, heart_rate_bpm,
+                    spo2_raw_pct, spo2_pct,
+                    skin_temp_c, ambient_temp_c, humidity_pct,
                     wrist_surface_temp_c,
                     accel_g, gyro_dps, fall_state,
-                    ppg, finger_present, motion_artifact,
+                    ppg, ppg_state, finger_present, motion_artifact,
                     heart_rate_valid, spo2_valid, skin_temp_valid,
                     ambient_temp_valid, humidity_valid, wrist_surface_temp_valid,
                     motion_valid,
                     rssi_dbm, free_heap, fw, faults_json, raw_json
                 ) VALUES (
-                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
+                    ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?
                 )
                 """,
                 (
@@ -837,7 +878,9 @@ class Database:
                     telemetry.uptime_ms,
                     received_at,
                     telemetry.schema_version,
+                    heart_rate_raw_bpm,
                     telemetry.vitals.heart_rate_bpm,
+                    spo2_raw_pct,
                     telemetry.vitals.spo2_pct,
                     skin_temp_c,
                     ambient_temp_c,
@@ -847,6 +890,7 @@ class Database:
                     telemetry.motion.gyro_dps,
                     telemetry.motion.fall_state,
                     telemetry.quality.ppg,
+                    ppg_state,
                     int(telemetry.quality.finger_present),
                     int(telemetry.quality.motion_artifact),
                     int(telemetry.quality.heart_rate_valid),
@@ -1396,6 +1440,28 @@ class Database:
     @staticmethod
     def _telemetry_dict(row: sqlite3.Row) -> dict[str, Any]:
         data = dict(row)
+        ppg_state = data["ppg_state"] or "legacy"
+
+        def measurement(
+            raw_value: float | None,
+            confirmed_value: float | None,
+            valid: bool,
+            unit: str,
+        ) -> dict[str, Any]:
+            reason = None if valid else (
+                ppg_state if ppg_state != "valid" else "unconfirmed"
+            )
+            return {
+                "raw_value": raw_value,
+                "confirmed_value": confirmed_value,
+                "valid": valid,
+                "state": ppg_state,
+                "reason": reason,
+                "unit": unit,
+            }
+
+        heart_rate_valid = bool(data["heart_rate_valid"])
+        spo2_valid = bool(data["spo2_valid"])
         return {
             "id": data["id"],
             "schema": data["schema_version"],
@@ -1409,6 +1475,20 @@ class Database:
                 "heart_rate_bpm": data["heart_rate_bpm"],
                 "spo2_pct": data["spo2_pct"],
                 "skin_temp_c": data["skin_temp_c"],
+            },
+            "measurements": {
+                "heart_rate": measurement(
+                    data["heart_rate_raw_bpm"],
+                    data["heart_rate_bpm"],
+                    heart_rate_valid,
+                    "bpm",
+                ),
+                "spo2": measurement(
+                    data["spo2_raw_pct"],
+                    data["spo2_pct"],
+                    spo2_valid,
+                    "%",
+                ),
             },
             "environment": {
                 "ambient_temp_c": data["ambient_temp_c"],
@@ -1424,10 +1504,11 @@ class Database:
             },
             "quality": {
                 "ppg": data["ppg"],
+                "ppg_state": ppg_state,
                 "finger_present": bool(data["finger_present"]),
                 "motion_artifact": bool(data["motion_artifact"]),
-                "heart_rate_valid": bool(data["heart_rate_valid"]),
-                "spo2_valid": bool(data["spo2_valid"]),
+                "heart_rate_valid": heart_rate_valid,
+                "spo2_valid": spo2_valid,
                 "skin_temp_valid": bool(data["skin_temp_valid"]),
                 "ambient_temp_valid": bool(data["ambient_temp_valid"]),
                 "humidity_valid": bool(data["humidity_valid"]),

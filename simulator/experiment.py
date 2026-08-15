@@ -265,7 +265,7 @@ def config_material(
         "seed": seed,
         "interval_seconds": interval_seconds,
         "device_id": device_id,
-        "schema": "health.telemetry.v3",
+        "schema": "health.telemetry.v4",
         "polling_resolution_ms": polling_resolution_ms,
         "observe_timeout_seconds": observe_timeout_seconds,
     }
@@ -503,7 +503,7 @@ def run_experiment(args: argparse.Namespace) -> tuple[Path, dict[str, Any]]:
         "topic_namespace": "iot-health/v1/devices/{device_id}/{stream}",
         "device_id": args.device_id,
         "boot_id": stream.boot_id,
-        "schema": "health.telemetry.v3",
+        "schema": "health.telemetry.v4",
         "commit": provenance["head_commit"],
         "source_provenance": provenance,
         "config_hash": config_hash,

@@ -14,6 +14,7 @@ from edge.schemas import (
     Telemetry,
     TelemetryV2,
     TelemetryV3,
+    TelemetryV4,
     parse_telemetry,
     parse_topic,
 )
@@ -27,24 +28,30 @@ def test_valid_exact_telemetry_schema_is_accepted(valid_telemetry_payload):
     assert telemetry.quality.ppg == 0.88
 
 
-def test_parser_accepts_strict_v1_v2_and_v3_without_weakening_older_classes(
+def test_parser_accepts_strict_v1_through_v4_without_weakening_older_classes(
     valid_telemetry_payload,
     valid_telemetry_v2_payload,
     valid_telemetry_v3_payload,
+    valid_telemetry_v4_payload,
 ):
     v1 = parse_telemetry(json.dumps(valid_telemetry_payload))
     v2 = parse_telemetry(json.dumps(valid_telemetry_v2_payload).encode())
     v3 = parse_telemetry(bytearray(json.dumps(valid_telemetry_v3_payload).encode()))
+    v4 = parse_telemetry(json.dumps(valid_telemetry_v4_payload))
 
     assert isinstance(v1, Telemetry)
     assert isinstance(v2, TelemetryV2)
     assert isinstance(v3, TelemetryV3)
+    assert isinstance(v4, TelemetryV4)
     assert v2.environment.ambient_temp_c == 28.5
     assert v3.wearable.wrist_surface_temp_c == 32.8
+    assert v4.vitals.heart_rate_raw_bpm == 76.4
     with pytest.raises(ValidationError):
         Telemetry.model_validate(valid_telemetry_v2_payload)
     with pytest.raises(ValidationError):
         TelemetryV2.model_validate(valid_telemetry_v3_payload)
+    with pytest.raises(ValidationError):
+        TelemetryV3.model_validate(valid_telemetry_v4_payload)
 
 
 def test_v2_environment_bounds_and_validity_are_strict(valid_telemetry_v2_payload):
@@ -187,9 +194,70 @@ def test_v3_ds18b20_failure_and_only_exact_v3_fields_are_accepted(
         TelemetryV3.model_validate(payload)
 
 
+def test_v4_raw_values_can_survive_unconfirmed_ppg(
+    valid_telemetry_v4_payload,
+):
+    payload = json.loads(json.dumps(valid_telemetry_v4_payload))
+    payload["vitals"]["heart_rate_bpm"] = None
+    payload["vitals"]["spo2_pct"] = None
+    payload["quality"]["heart_rate_valid"] = False
+    payload["quality"]["spo2_valid"] = False
+    payload["quality"]["ppg_state"] = "unstable"
+
+    telemetry = TelemetryV4.model_validate(payload)
+
+    assert telemetry.vitals.heart_rate_raw_bpm == 76.4
+    assert telemetry.vitals.spo2_raw_pct == 97.2
+    assert telemetry.vitals.heart_rate_bpm is None
+    assert telemetry.vitals.spo2_pct is None
+
+
+@pytest.mark.parametrize("ppg_state", ["no_finger", "sample_loss"])
+def test_v4_no_finger_or_sample_loss_requires_null_raw_and_confirmed_values(
+    valid_telemetry_v4_payload,
+    ppg_state,
+):
+    payload = json.loads(json.dumps(valid_telemetry_v4_payload))
+    payload["vitals"] = {
+        "heart_rate_raw_bpm": None,
+        "heart_rate_bpm": None,
+        "spo2_raw_pct": None,
+        "spo2_pct": None,
+    }
+    payload["quality"].update(
+        {
+            "ppg": None,
+            "ppg_state": ppg_state,
+            "finger_present": False,
+            "heart_rate_valid": False,
+            "spo2_valid": False,
+        }
+    )
+
+    assert TelemetryV4.model_validate(payload).quality.ppg_state == ppg_state
+
+    payload["vitals"]["heart_rate_raw_bpm"] = 81.0
+    with pytest.raises(ValidationError, match="raw PPG values must be null"):
+        TelemetryV4.model_validate(payload)
+
+
+def test_v4_confirmed_values_require_valid_flags_and_valid_ppg_state(
+    valid_telemetry_v4_payload,
+):
+    invalid_flag = json.loads(json.dumps(valid_telemetry_v4_payload))
+    invalid_flag["quality"]["heart_rate_valid"] = False
+    with pytest.raises(ValidationError, match="must be null"):
+        TelemetryV4.model_validate(invalid_flag)
+
+    invalid_state = json.loads(json.dumps(valid_telemetry_v4_payload))
+    invalid_state["quality"]["ppg_state"] = "warming_up"
+    with pytest.raises(ValidationError, match="require ppg_state='valid'"):
+        TelemetryV4.model_validate(invalid_state)
+
+
 def test_telemetry_parser_rejects_unknown_or_non_object_schema():
     with pytest.raises(ValueError, match="unsupported telemetry schema"):
-        parse_telemetry('{"schema":"health.telemetry.v4"}')
+        parse_telemetry('{"schema":"health.telemetry.v5"}')
     with pytest.raises(ValueError, match="JSON object"):
         parse_telemetry("[]")
 

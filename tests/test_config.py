@@ -153,6 +153,7 @@ def test_settings_repr_redacts_transport_credentials():
         ({"max_sample_gap_seconds": 0.0}, "DEMO_MAX_SAMPLE_GAP_SECONDS"),
         ({"min_ppg_quality": 1.1}, "DEMO_MIN_PPG_QUALITY"),
         ({"hold_seconds": -1.0}, "hold/recovery durations"),
+        ({"recovery_seconds": -1.0}, "hold/recovery durations"),
     ],
 )
 def test_demo_rule_guardrails_are_validated(overrides, message):
@@ -167,3 +168,11 @@ def test_surface_temperature_rule_settings_are_retired():
     assert not hasattr(settings, "temp_hysteresis")
     with pytest.raises(TypeError):
         DemoRuleSettings(surface_temp_threshold=38.0)
+
+
+def test_vital_recovery_hold_defaults_to_ten_seconds_and_is_configurable(monkeypatch):
+    assert DemoRuleSettings().recovery_seconds == 10.0
+
+    monkeypatch.setenv("DEMO_RULE_RECOVERY_SECONDS", "7.5")
+
+    assert DemoRuleSettings().recovery_seconds == 7.5

@@ -54,6 +54,9 @@ class DemoRuleSettings:
     hold_seconds: float = field(
         default_factory=lambda: _env_float("DEMO_RULE_HOLD_SECONDS", 10.0)
     )
+    recovery_seconds: float = field(
+        default_factory=lambda: _env_float("DEMO_RULE_RECOVERY_SECONDS", 10.0)
+    )
     spo2_hysteresis: float = field(
         default_factory=lambda: _env_float("DEMO_LOW_SPO2_HYSTERESIS", 2.0)
     )
@@ -75,7 +78,11 @@ class DemoRuleSettings:
             raise ValueError("DEMO_LOW_SPO2_THRESHOLD must be between 0 and 100")
         if not 0 < self.high_hr_threshold <= 300:
             raise ValueError("DEMO_HIGH_HR_THRESHOLD must be between 0 and 300")
-        if self.hold_seconds < 0 or self.fall_recovery_seconds < 0:
+        if (
+            self.hold_seconds < 0
+            or self.recovery_seconds < 0
+            or self.fall_recovery_seconds < 0
+        ):
             raise ValueError("demo hold/recovery durations cannot be negative")
         if self.max_sample_gap_seconds <= 0:
             raise ValueError("DEMO_MAX_SAMPLE_GAP_SECONDS must be greater than zero")

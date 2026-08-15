@@ -16,6 +16,8 @@ struct NullableMeasurement {
 };
 
 struct TelemetrySnapshot {
+  NullableMeasurement heartRateRawBpm;
+  NullableMeasurement spo2RawPct;
   NullableMeasurement heartRateBpm;
   NullableMeasurement spo2Pct;
   NullableMeasurement wristSurfaceTempC;
@@ -27,6 +29,7 @@ struct TelemetrySnapshot {
   float ppgQuality = 0.0F;
   bool fingerPresent = false;
   bool motionArtifact = false;
+  const char* ppgState = "no_finger";
   const char* fallState = "idle";
 
   uint8_t faultMask = kFaultNone;

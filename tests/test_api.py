@@ -422,6 +422,75 @@ def test_existing_api_routes_expose_normalized_v3_wearable(
         assert item["quality"]["skin_temp_valid"] is False
 
 
+def test_existing_api_routes_expose_v4_raw_and_confirmed_measurements(
+    client, valid_telemetry_v4_payload
+):
+    assert ingest(client, "telemetry", valid_telemetry_v4_payload).accepted
+
+    latest = client.get("/api/v1/devices/health-node-01/latest").json()
+    history = client.get(
+        "/api/v1/devices/health-node-01/telemetry"
+    ).json()["data"]
+    overview = client.get(
+        "/api/v1/overview?device_id=health-node-01&window=15m"
+    ).json()
+
+    for item in (latest, history[0], overview["latest"]):
+        assert item["schema"] == item["schema_version"] == "health.telemetry.v4"
+        assert item["vitals"] == {
+            "heart_rate_bpm": 76.0,
+            "spo2_pct": 97.0,
+            "skin_temp_c": None,
+        }
+        assert item["measurements"]["heart_rate"] == {
+            "raw_value": 76.4,
+            "confirmed_value": 76.0,
+            "valid": True,
+            "state": "valid",
+            "reason": None,
+            "unit": "bpm",
+        }
+        assert item["measurements"]["spo2"] == {
+            "raw_value": 97.2,
+            "confirmed_value": 97.0,
+            "valid": True,
+            "state": "valid",
+            "reason": None,
+            "unit": "%",
+        }
+        assert item["quality"]["ppg_state"] == "valid"
+
+
+def test_v4_unstable_raw_candidate_is_auditable_but_never_exposed_as_confirmed(
+    client, valid_telemetry_v4_payload
+):
+    payload = json.loads(json.dumps(valid_telemetry_v4_payload))
+    payload["vitals"].update(
+        heart_rate_raw_bpm=180.0,
+        heart_rate_bpm=None,
+        spo2_raw_pct=97.0,
+        spo2_pct=None,
+    )
+    payload["quality"].update(
+        ppg_state="unstable",
+        heart_rate_valid=False,
+        spo2_valid=False,
+    )
+
+    assert ingest(client, "telemetry", payload).accepted
+    latest = client.get("/api/v1/devices/health-node-01/latest").json()
+
+    assert latest["vitals"]["heart_rate_bpm"] is None
+    assert latest["measurements"]["heart_rate"] == {
+        "raw_value": 180.0,
+        "confirmed_value": None,
+        "valid": False,
+        "state": "unstable",
+        "reason": "unstable",
+        "unit": "bpm",
+    }
+
+
 def test_overview_accepts_plain_minutes_and_rejects_invalid_window(client):
     assert client.get("/api/v1/overview?window=30").status_code == 200
     assert client.get("/api/v1/overview?window=15m").status_code == 200

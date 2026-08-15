@@ -394,6 +394,31 @@ function setQualityLabel(element, valid, invalidText) {
   element.textContent = valid ? "Hợp lệ" : invalidText;
 }
 
+const ppgStateLabels = {
+  valid: "Đã xác nhận",
+  legacy: "Hợp lệ (legacy)",
+  no_finger: "Chờ đặt ngón tay",
+  warming_up: "Đang xác nhận",
+  motion: "Có nhiễu chuyển động",
+  clipping: "Tín hiệu quang bị clipping",
+  low_perfusion: "Tín hiệu quang yếu",
+  unstable: "Đang xác nhận",
+  sample_loss: "Mất mẫu PPG",
+};
+
+function ppgInvalidLabel(quality) {
+  if (["valid", "legacy"].includes(quality.ppg_state)) return "Đang xác nhận";
+  return ppgStateLabels[quality.ppg_state]
+    || (quality.finger_present ? "Đang xác nhận" : "Chờ đặt ngón tay");
+}
+
+function confirmedMeasurement(latest, key, legacyValue) {
+  const measurement = latest.measurements && latest.measurements[key];
+  return measurement && Object.hasOwn(measurement, "confirmed_value")
+    ? measurement.confirmed_value
+    : legacyValue;
+}
+
 function clearLatest() {
   [elements.heartRate, elements.spo2, elements.wristTemp].forEach((item) => { item.textContent = "—"; });
   [elements.heartQuality, elements.spo2Quality, elements.wristTempQuality].forEach((item) => {
@@ -416,9 +441,12 @@ function deriveMeasurementState(latest, online) {
   if (sensorFault) return ["fault", "Lỗi cảm biến"];
   if (!quality.finger_present) return ["waiting", "Chờ đặt ngón tay"];
   if (quality.motion_artifact) return ["noisy", "Có nhiễu chuyển động"];
+  if (quality.ppg_state && !["valid", "legacy"].includes(quality.ppg_state)) {
+    return ["measuring", ppgInvalidLabel(quality)];
+  }
   const schema = latest.schema || latest.schema_version;
   const allValid = quality.heart_rate_valid && quality.spo2_valid
-    && (schema !== "health.telemetry.v3" || quality.wrist_surface_temp_valid);
+    && (!["health.telemetry.v3", "health.telemetry.v4"].includes(schema) || quality.wrist_surface_temp_valid);
   return allValid ? ["valid", "Mẫu hợp lệ"] : ["measuring", "Đang tích lũy mẫu"];
 }
 
@@ -434,10 +462,15 @@ function renderLatest(latest, online) {
   const system = latest.system || {};
   const stale = !online;
   const schema = latest.schema || latest.schema_version;
-  const isWearableV3 = schema === "health.telemetry.v3";
+  const isWearableV3 = ["health.telemetry.v3", "health.telemetry.v4"].includes(schema);
 
-  elements.heartRate.textContent = formatNumber(vitals.heart_rate_bpm);
-  elements.spo2.textContent = formatNumber(vitals.spo2_pct, 1);
+  elements.heartRate.textContent = formatNumber(
+    confirmedMeasurement(latest, "heart_rate", vitals.heart_rate_bpm),
+  );
+  elements.spo2.textContent = formatNumber(
+    confirmedMeasurement(latest, "spo2", vitals.spo2_pct),
+    1,
+  );
   elements.wristTemp.textContent = isWearableV3
     ? formatNumber(wearable.wrist_surface_temp_c, 1)
     : "—";
@@ -455,12 +488,12 @@ function renderLatest(latest, online) {
     setQualityLabel(
       elements.heartQuality,
       quality.heart_rate_valid,
-      quality.finger_present ? "Đang đo / không tin cậy" : "Chờ đặt ngón tay",
+      ppgInvalidLabel(quality),
     );
     setQualityLabel(
       elements.spo2Quality,
       quality.spo2_valid,
-      quality.finger_present ? "Đang đo / không tin cậy" : "Chờ đặt ngón tay",
+      ppgInvalidLabel(quality),
     );
     if (isWearableV3) {
       setQualityLabel(elements.wristTempQuality, quality.wrist_surface_temp_valid, "DS18B20 không sẵn sàng");
@@ -480,7 +513,10 @@ function renderLatest(latest, online) {
     : (allValid ? "Dữ liệu hợp lệ" : measurementLabel);
   elements.latestDataState.hidden = !stale;
   elements.fingerState.textContent = quality.finger_present ? "Đã phát hiện" : "Chưa đặt ngón tay";
-  elements.ppgQuality.textContent = Number.isFinite(quality.ppg) ? formatPercent(quality.ppg) : "Không có";
+  const ppgStateText = ppgStateLabels[quality.ppg_state];
+  elements.ppgQuality.textContent = Number.isFinite(quality.ppg)
+    ? `${formatPercent(quality.ppg)}${ppgStateText ? ` · ${ppgStateText}` : ""}`
+    : (ppgStateText || "Không có");
   elements.motionArtifact.textContent = quality.motion_artifact ? "Có nhiễu" : "Không phát hiện";
   elements.fallState.textContent = fallStateLabels[motion.fall_state] || motion.fall_state || "—";
   elements.rssi.textContent = Number.isFinite(system.rssi_dbm)
@@ -493,7 +529,7 @@ function renderLatest(latest, online) {
 function metricValue(item, key) {
   const definition = chartDefinitions[key];
   const schema = item && (item.schema || item.schema_version);
-  if (key === "wrist_surface_temp_c" && schema !== "health.telemetry.v3") return null;
+  if (key === "wrist_surface_temp_c" && !["health.telemetry.v3", "health.telemetry.v4"].includes(schema)) return null;
   return item && definition && item[definition.group] ? item[definition.group][key] : null;
 }
 

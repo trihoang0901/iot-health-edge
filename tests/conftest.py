@@ -132,6 +132,47 @@ def valid_telemetry_v3_payload() -> dict[str, Any]:
 
 
 @pytest.fixture
+def valid_telemetry_v4_payload() -> dict[str, Any]:
+    return {
+        "schema": "health.telemetry.v4",
+        "device_id": "health-node-01",
+        "boot_id": "boot-0004",
+        "seq": 4,
+        "uptime_ms": 4000,
+        "vitals": {
+            "heart_rate_raw_bpm": 76.4,
+            "heart_rate_bpm": 76.0,
+            "spo2_raw_pct": 97.2,
+            "spo2_pct": 97.0,
+        },
+        "wearable": {
+            "wrist_surface_temp_c": 32.8,
+        },
+        "motion": {
+            "accel_g": 1.01,
+            "gyro_dps": 2.5,
+            "fall_state": "idle",
+        },
+        "quality": {
+            "ppg": 0.88,
+            "ppg_state": "valid",
+            "finger_present": True,
+            "motion_artifact": False,
+            "heart_rate_valid": True,
+            "spo2_valid": True,
+            "motion_valid": True,
+            "wrist_surface_temp_valid": True,
+        },
+        "system": {
+            "rssi_dbm": -55,
+            "free_heap": 31_000,
+            "fw": "0.4.0",
+            "faults": [],
+        },
+    }
+
+
+@pytest.fixture
 def app_settings(tmp_path: Path) -> Settings:
     return Settings(
         database_path=tmp_path / "test.db",
@@ -145,6 +186,7 @@ def app_settings(tmp_path: Path) -> Settings:
             low_spo2_threshold=92.0,
             high_hr_threshold=120.0,
             hold_seconds=0.0,
+            recovery_seconds=0.0,
             spo2_hysteresis=2.0,
             hr_hysteresis=5.0,
             min_ppg_quality=0.5,

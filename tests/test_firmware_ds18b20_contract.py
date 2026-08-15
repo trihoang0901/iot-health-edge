@@ -82,13 +82,13 @@ def test_ds18b20_schedule_has_native_regressions():
     assert "!schedule.measurementValid()" in native_test
 
 
-def test_telemetry_v3_exposes_only_wrist_surface_temperature():
+def test_telemetry_v4_exposes_only_wrist_surface_temperature():
     model = MODEL.read_text(encoding="utf-8")
     transport = MQTT_TRANSPORT.read_text(encoding="utf-8")
 
     assert "NullableMeasurement wristSurfaceTempC;" in model
     assert "kFaultDs18b20" in model
-    assert 'document_["schema"] = "health.telemetry.v3";' in transport
+    assert 'document_["schema"] = "health.telemetry.v4";' in transport
     assert '"wrist_surface_temp_c"' in transport
     assert 'quality["wrist_surface_temp_valid"]' in transport
     assert 'target.add("ds18b20_unavailable")' in transport

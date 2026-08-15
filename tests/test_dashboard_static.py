@@ -59,8 +59,45 @@ def test_dashboard_charts_only_v3_wearable_temperature():
     assert 'group: "wearable"' in script
     assert "latest.wearable || {}" in script
     assert "wearable.wrist_surface_temp_c" in script
-    assert 'schema !== "health.telemetry.v3"' in script
+    assert '"health.telemetry.v3", "health.telemetry.v4"' in script
     assert "skin_temp_c" not in script
+
+
+def test_dashboard_withholds_unstable_raw_hr_and_shows_confirmation_state():
+    fetch_implementation = r"""
+async (url) => {
+  if (url.includes("/devices")) {
+    return { ok: true, json: async () => ({ data: [{ device_id: "node-v4", online: true }] }) };
+  }
+  if (url.includes("/overview")) {
+    return { ok: true, json: async () => ({
+      device: { online: true },
+      latest: {
+        schema: "health.telemetry.v4",
+        vitals: { heart_rate_raw_bpm: 180, heart_rate_bpm: null, spo2_raw_pct: 97, spo2_pct: null },
+        measurements: {
+          heart_rate: { raw_value: 180, confirmed_value: null, valid: false, state: "unstable", reason: "unstable" },
+          spo2: { raw_value: 97, confirmed_value: null, valid: false, state: "unstable", reason: "unstable" }
+        },
+        wearable: { wrist_surface_temp_c: 33.2 },
+        quality: {
+          heart_rate_valid: false, spo2_valid: false, finger_present: true,
+          wrist_surface_temp_valid: true, ppg: 0.58, ppg_state: "unstable",
+          motion_artifact: false, motion_valid: true
+        },
+        motion: { fall_state: "idle" }, system: { fw: "0.4.0", faults: [] }
+      },
+      history: [], alerts: []
+    }) };
+  }
+  return { ok: true, json: async () => ({ data: [] }) };
+}
+"""
+
+    state = run_dashboard_failure_harness(fetch_implementation)
+
+    assert state["heartRate"] == "—"
+    assert state["heartQuality"] == "Đang xác nhận"
 
 
 def test_offline_dashboard_marks_cached_measurements_and_rssi_as_last_values():

@@ -612,14 +612,16 @@ bool MqttTransport::publishTelemetry(const TelemetrySnapshot& snapshot,
   }
 
   document_.clear();
-  document_["schema"] = "health.telemetry.v3";
+  document_["schema"] = "health.telemetry.v4";
   document_["device_id"] = deviceId_;
   document_["boot_id"] = bootId_;
   document_["seq"] = allocateSequence();
   document_["uptime_ms"] = nowMs;
 
   JsonObject vitals = document_["vitals"].to<JsonObject>();
+  setNullable(vitals, "heart_rate_raw_bpm", snapshot.heartRateRawBpm);
   setNullable(vitals, "heart_rate_bpm", snapshot.heartRateBpm);
+  setNullable(vitals, "spo2_raw_pct", snapshot.spo2RawPct);
   setNullable(vitals, "spo2_pct", snapshot.spo2Pct);
 
   JsonObject wearable = document_["wearable"].to<JsonObject>();
@@ -640,6 +642,7 @@ bool MqttTransport::publishTelemetry(const TelemetrySnapshot& snapshot,
   quality["ppg"] = constrain(snapshot.ppgQuality, 0.0F, 1.0F);
   quality["finger_present"] = snapshot.fingerPresent;
   quality["motion_artifact"] = snapshot.motionArtifact;
+  quality["ppg_state"] = snapshot.ppgState;
   quality["heart_rate_valid"] = snapshot.heartRateBpm.valid;
   quality["spo2_valid"] = snapshot.spo2Pct.valid;
   quality["wrist_surface_temp_valid"] = snapshot.wristSurfaceTempC.valid;
