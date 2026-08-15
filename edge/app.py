@@ -14,11 +14,14 @@ from starlette.middleware.trustedhost import TrustedHostMiddleware
 
 from .config import Settings
 from .db import AlertAlreadyResolvedError, Database, isoformat_utc, utc_now
+from .experiments import ExperimentNotFoundError, ExperimentRegistry
 from .mqtt_client import EdgeMqttClient
 from .notifications import TelegramApiClient, TelegramNotifier
 from .rules import RuleEngine
 from .schemas import AckRequest
 from .service import IngestionService
+from simulator.mqtt_simulator import SCENARIOS
+from simulator.network_profiles import public_profiles
 
 
 STATIC_DIR = Path(__file__).with_name("static")
@@ -114,6 +117,7 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         notifier=notifier,
     )
     mqtt_client = EdgeMqttClient(settings, ingestion) if settings.mqtt_enabled else None
+    experiments = ExperimentRegistry(settings.experiment_evidence_dir)
 
     @asynccontextmanager
     async def lifespan(_: FastAPI) -> AsyncIterator[None]:
@@ -140,6 +144,34 @@ def create_app(settings: Settings | None = None) -> FastAPI:
     app.state.ingestion = ingestion
     app.state.mqtt = mqtt_client
     app.state.notifications = notifier
+    app.state.experiments = experiments
+
+    def runtime_health_snapshot() -> dict[str, Any]:
+        """Return one health truth used by both machine- and UI-facing APIs."""
+        db_ok = database.is_healthy()
+        ingestion_health = ingestion.metrics()
+        mqtt_health = (
+            mqtt_client.health()
+            if mqtt_client
+            else {
+                "enabled": False,
+                "connected": False,
+                "subscribed": False,
+                "last_error": None,
+            }
+        )
+        ingestion_ok = bool(ingestion_health.get("worker_alive")) and not bool(
+            ingestion_health.get("processing_errors")
+        )
+        mqtt_ok = not mqtt_client or bool(
+            mqtt_health.get("connected") and mqtt_health.get("subscribed")
+        )
+        return {
+            "status": "ok" if db_ok and ingestion_ok and mqtt_ok else "degraded",
+            "database_healthy": db_ok,
+            "ingestion": ingestion_health,
+            "mqtt": mqtt_health,
+        }
 
     app.add_middleware(TrustedHostMiddleware, allowed_hosts=list(settings.allowed_hosts))
 
@@ -171,27 +203,96 @@ def create_app(settings: Settings | None = None) -> FastAPI:
 
     @app.get("/healthz")
     def healthz() -> dict[str, Any]:
-        db_ok = database.is_healthy()
-        ingestion_health = ingestion.metrics()
-        mqtt_health = (
-            mqtt_client.health()
-            if mqtt_client
-            else {"enabled": False, "connected": False, "last_error": None}
-        )
-        ingestion_ok = bool(ingestion_health["worker_alive"]) and not bool(
-            ingestion_health["processing_errors"]
-        )
-        mqtt_ok = not mqtt_client or bool(
-            mqtt_health["connected"] and mqtt_health.get("subscribed", False)
-        )
-        overall = "ok" if db_ok and ingestion_ok and mqtt_ok else "degraded"
+        snapshot = runtime_health_snapshot()
+        ingestion_health = snapshot["ingestion"]
+        mqtt_health = snapshot["mqtt"]
+        ingestion_public = {
+            key: value
+            for key, value in ingestion_health.items()
+            if key != "last_error"
+        }
+        ingestion_public["has_error"] = bool(ingestion_health.get("last_error"))
+        mqtt_public = {
+            key: value for key, value in mqtt_health.items() if key != "last_error"
+        }
+        mqtt_public["has_error"] = bool(mqtt_health.get("last_error"))
         return {
-            "status": overall,
-            "database": {"healthy": db_ok},
-            "mqtt": mqtt_health,
-            "ingestion": ingestion_health,
+            "status": snapshot["status"],
+            "database": {"healthy": snapshot["database_healthy"]},
+            "mqtt": mqtt_public,
+            "ingestion": ingestion_public,
             "non_clinical": True,
         }
+
+    @app.get("/api/v1/runtime")
+    def runtime() -> dict[str, Any]:
+        snapshot = runtime_health_snapshot()
+        ingestion_health = snapshot["ingestion"]
+        mqtt_health = snapshot["mqtt"]
+        ingestion_public = {
+            key: ingestion_health[key]
+            for key in (
+                "accepted",
+                "duplicates",
+                "rejected",
+                "queue_dropped",
+                "processing_errors",
+                "queue_depth",
+                "worker_alive",
+            )
+            if key in ingestion_health
+        }
+        mqtt_public = {
+            key: mqtt_health[key]
+            for key in ("enabled", "connected", "subscribed")
+            if key in mqtt_health
+        }
+        return {
+            "generated_at": isoformat_utc(utc_now()),
+            "edge": {
+                "status": snapshot["status"],
+                "database_healthy": snapshot["database_healthy"],
+            },
+            "mqtt": mqtt_public,
+            "ingestion": ingestion_public,
+            "sanitized": True,
+        }
+
+    @app.get("/api/v1/capabilities")
+    def capabilities() -> dict[str, Any]:
+        return {
+            "course_track": "IoT Protocol",
+            "protocol": {
+                "name": "MQTT",
+                "version": "3.1.1",
+                "transport": "TCP",
+                "topic_namespace": "iot-health/v1/devices/{device_id}/{stream}",
+                "streams": ["telemetry", "event", "status"],
+            },
+            "scenarios": list(SCENARIOS),
+            "profiles": public_profiles(),
+            "claims": {
+                "non_clinical": True,
+                "measured_5g": False,
+                "app_impairment_is_network_measurement": False,
+                "primary_latency_kind": "schedule_to_api_polling_upper_bound",
+                "diagnostic_latency_kind": "publish_to_api_polling_upper_bound",
+            },
+        }
+
+    @app.get("/api/v1/experiments")
+    def list_experiments(
+        limit: Annotated[int, Query(ge=1, le=500)] = 100,
+    ) -> dict[str, Any]:
+        items = experiments.list_runs(limit=limit)
+        return {"data": items, "total": len(items)}
+
+    @app.get("/api/v1/experiments/{run_id}")
+    def get_experiment(run_id: str) -> dict[str, Any]:
+        try:
+            return experiments.get_run(run_id)
+        except ExperimentNotFoundError as exc:
+            raise HTTPException(status_code=404, detail="Không tìm thấy thí nghiệm") from exc
 
     @app.get("/api/v1/devices")
     def list_devices() -> dict[str, Any]:
@@ -283,6 +384,29 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         window: str = "15m",
     ) -> dict[str, Any]:
         window_minutes = _parse_window_minutes(window)
+        generated_at = utc_now()
+        requested_to = generated_at
+        requested_from = generated_at - timedelta(minutes=window_minutes)
+        requested_from_text = isoformat_utc(requested_from)
+        requested_to_text = isoformat_utc(requested_to)
+        empty_history_meta = {
+            "requested_from": requested_from_text,
+            "requested_to": requested_to_text,
+            "coverage_from": None,
+            "coverage_to": None,
+            "total_available": 0,
+            "returned": 0,
+            "truncated": False,
+            "downsampling": "none",
+            "validity": {
+                metric: {"valid": 0, "total": 0}
+                for metric in (
+                    "heart_rate_bpm",
+                    "spo2_pct",
+                    "wrist_surface_temp_c",
+                )
+            },
+        }
         devices = database.list_devices()
         if device_id:
             device = database.get_device(device_id)
@@ -292,23 +416,33 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             device = devices[0] if devices else None
         if device is None:
             return {
-                "generated_at": isoformat_utc(utc_now()),
+                "generated_at": requested_to_text,
                 "device": None,
                 "latest": None,
                 "history": [],
+                "history_meta": empty_history_meta,
                 "alerts": [],
                 "window_minutes": window_minutes,
                 "non_clinical": True,
             }
         selected_id = device["device_id"]
-        since = utc_now() - timedelta(minutes=window_minutes)
+        history, history_meta = database.telemetry_history_window(
+            selected_id,
+            from_time=requested_from_text,
+            to_time=requested_to_text,
+            limit=1000,
+        )
+        history_meta = {
+            "requested_from": requested_from_text,
+            "requested_to": requested_to_text,
+            **history_meta,
+        }
         return {
-            "generated_at": isoformat_utc(utc_now()),
+            "generated_at": requested_to_text,
             "device": _effective_device(device, settings.offline_after_seconds),
             "latest": database.latest_telemetry(selected_id),
-            "history": database.telemetry_history(
-                selected_id, from_time=isoformat_utc(since), limit=1000
-            ),
+            "history": history,
+            "history_meta": history_meta,
             "alerts": database.list_alerts(
                 state="active", device_id=selected_id, limit=100
             ),

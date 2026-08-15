@@ -33,6 +33,7 @@ services:
       EDGE_QUEUE_SIZE: ${EDGE_QUEUE_SIZE:-1000}
       EDGE_MAX_PAYLOAD_BYTES: ${EDGE_MAX_PAYLOAD_BYTES:-4096}
       EDGE_TELEMETRY_RETENTION_ROWS: ${EDGE_TELEMETRY_RETENTION_ROWS:-50000}
+      EDGE_EXPERIMENT_EVIDENCE_DIR: /app/evidence/runs
       DEVICE_OFFLINE_AFTER_SECONDS: ${DEVICE_OFFLINE_AFTER_SECONDS:-15}
       DEMO_MAX_SAMPLE_GAP_SECONDS: ${DEMO_MAX_SAMPLE_GAP_SECONDS:-3}
       TELEGRAM_ENABLED: ${TELEGRAM_ENABLED:-false}
@@ -54,6 +55,7 @@ services:
       - "127.0.0.1:8000:8000"
     volumes:
       - edge-data:/app/data
+      - ../evidence/runs:/app/evidence/runs:ro
     read_only: true
     tmpfs:
       - /tmp:size=16m,mode=1777

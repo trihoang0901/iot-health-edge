@@ -30,6 +30,7 @@ htmlcov/
 *.egg-info/
 build/
 dist/
+node_modules/
 
 # Runtime data
 *.db
@@ -38,9 +39,17 @@ dist/
 *.sqlite
 *.sqlite3
 data/
+evidence/runs/*
+!evidence/runs/.gitkeep
+evidence/final/*
+!evidence/final/.gitkeep
+!evidence/final/*.zip
+!evidence/final/*.sha256
+!evidence/final/*-manifest.json
 
 # PlatformIO and editors
 .pio/
+.pio-core/
 .codex-tmp/
 *.bin
 *.elf
@@ -55,3 +64,4 @@ data/
 .DS_Store
 Thumbs.db
 desktop.ini
+~$*.docx

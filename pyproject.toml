@@ -15,12 +15,18 @@ dependencies = [
 
 [project.scripts]
 iot-health-edge = "edge.__main__:main"
+iot-health-experiment = "simulator.experiment:main"
 
 [project.optional-dependencies]
 test = [
   "httpx2>=2,<3",
   "pytest>=8,<10",
   "pytest-cov>=5,<8",
+]
+artifact = [
+  "Pillow==12.3.0",
+  "pypdfium2==5.12.1",
+  "python-docx==1.2.0",
 ]
 
 [tool.setuptools.packages.find]

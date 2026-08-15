@@ -112,6 +112,11 @@ class Settings:
     telemetry_retention_rows: int = field(
         default_factory=lambda: int(os.getenv("EDGE_TELEMETRY_RETENTION_ROWS", "50000"))
     )
+    experiment_evidence_dir: Path = field(
+        default_factory=lambda: Path(
+            os.getenv("EDGE_EXPERIMENT_EVIDENCE_DIR", "evidence/runs")
+        )
+    )
     offline_after_seconds: float = field(
         default_factory=lambda: _env_float("DEVICE_OFFLINE_AFTER_SECONDS", 15.0)
     )
@@ -166,6 +171,8 @@ class Settings:
             raise ValueError(
                 "EDGE_TELEMETRY_RETENTION_ROWS must be between 100 and 1000000"
             )
+        if not str(self.experiment_evidence_dir).strip():
+            raise ValueError("EDGE_EXPERIMENT_EVIDENCE_DIR must not be empty")
         if self.offline_after_seconds <= 0:
             raise ValueError("DEVICE_OFFLINE_AFTER_SECONDS must be greater than zero")
         if not 0 < self.telegram_request_timeout_seconds <= 60:

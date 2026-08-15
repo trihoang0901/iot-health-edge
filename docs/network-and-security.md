@@ -38,6 +38,61 @@ Windows thường đặt IP laptop ở adapter Mobile Hotspot là `192.168.137.1
 
 Nếu broker vẫn chạy trên laptop, MQTT từ NodeMCU tới laptop vẫn là lưu lượng cục bộ và chưa chứng minh qua 5G. Chỉ lưu lượng từ NodeMCU/laptop tới broker đầu xa mới đi tiếp qua USB tether 5G.
 
+## Profile thí nghiệm và ranh giới tuyên bố 5G
+
+Hai profile của experiment runner đều là profile ở **tầng ứng dụng**:
+
+- `lan-baseline`: không chủ động thêm trễ hoặc bỏ logical message;
+- `remote-app-emulated`: lập lịch delay/jitter/drop/outage trước MQTT publish,
+  luôn mang `profile_kind=app_impairment`, `injection_point=before_mqtt_publish`
+  và `network_claim=none`.
+
+Vì điểm chèn nằm trước MQTT publish, `intentionally_dropped` chỉ là bản tin mà
+runner chủ động không attempt. Không được đổi tên nó thành packet loss, không
+dùng nó để suy luận TCP retransmission/MQTT reconnect và không coi profile là
+benchmark Wi-Fi, nhà mạng hoặc 5G.
+
+Contract chính thức RQ2 là artifact version `5.0`, prefix
+`nt532-rq2-v5-`. Aggregate
+`evidence/analysis/rq2-v5-experiments.json` có SHA-256
+`b2bb2e80edee83bd8a89531d079e4148ddb1442e7a9734cb2de353e4cddd4ffb`,
+30 cặp seed và 30 message/run. Source provenance tại thời điểm đo là
+`source_state=worktree_uncommitted`, allowlisted SHA-256
+`f5e27d518f9a625397f289f90fd42bac9cf89d628c8e820a18ce55dfdacde280`;
+đây không phải hash toàn repository. Source cùng byte hiện được khóa tại commit
+`935c393e03a68465e538f624ff3405cd4560eb49`.
+
+KPI coverage chính là
+`scheduled_observation_ratio = unique_api_observed / scheduled`, nên logical
+drop trước publish vẫn nằm trong mẫu số. Median của `lan-baseline` là `1,0`
+[1,0; 1,0], còn `remote-app-emulated` là `0,833333`
+[0,8; 0,866667]. Intentional-drop ratio của remote là `0,166667`
+[0,133333; 0,2]. `attempted_delivery_ratio` có median `1,0` ở cả hai profile
+nhưng chỉ là KPI phụ cho message đã attempt, không được dùng để che coverage của
+toàn lịch.
+
+KPI latency chính là schedule-to-API polling upper-bound. P50/p95 median của LAN
+là `235,0` [234,0; 254,087] và `305,525 ms` [289,8; 348,4]; remote là
+`632,75` [539,0; 710,75] và `969,925 ms` [885,575; 1.101,75]. Paired delta
+remote trừ LAN là `+363,0 ms` [+316,5; +472,25] cho p50 và `+634,275 ms`
+[+564,875; +760,025] cho p95; coverage delta là `-0,166667`
+[-0,2; -0,133333]. Vì dropped message không có latency, percentile chỉ áp dụng
+cho message được quan sát và phải đọc cùng coverage. Measurement boundary là
+`clock_domain=host_monotonic_same_process`, polling `100 ms`, app impairment
+trước publish, `network_claim=none`, `measured_5g=false`. Publish-to-API chỉ là
+diagnostic upper-bound. Không số nào ở đây là one-way network latency; node vật
+lý chưa đồng bộ đồng hồ chỉ phù hợp với ingest-to-decision hoặc RTT
+request/response.
+
+5G chỉ là roadmap sau MVP. Chỉ mở phép đo backhaul 5G khi có broker/edge đầu xa,
+bằng chứng endpoint và route/network mode, thời điểm thử, baseline cùng tải,
+phương pháp đồng hồ/measurement point và transport đã bảo vệ. Tổng quan 5GS của
+3GPP mô tả UE, NG-RAN và 5GC; việc điện thoại hiện biểu tượng 5G không tự chứng
+minh MQTT local đã đi qua các lớp này. [RFC 9341](https://www.rfc-editor.org/rfc/rfc9341.html)
+minh họa rằng phép đo loss/delay thực cần correlation tại các measurement point,
+đồng bộ phù hợp và controlled domain; dự án không tuyên bố đã triển khai phương
+pháp Alternate-Marking của RFC này.
+
 ## Kiểm tra reachability
 
 1. Xác định đúng adapter và IPv4 bằng `ipconfig`.

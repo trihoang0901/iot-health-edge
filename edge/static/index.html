@@ -3,50 +3,177 @@
   <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <meta name="color-scheme" content="light">
-    <title>Giám sát sức khỏe thử nghiệm</title>
+    <meta name="color-scheme" content="dark">
+    <meta name="theme-color" content="#101416">
+    <meta
+      name="description"
+      content="Bàn điều khiển thí nghiệm độ tin cậy MQTT-edge phi lâm sàng cho môn NT532."
+    >
+    <title>NT532 · Bàn điều khiển độ tin cậy MQTT</title>
     <link rel="icon" href="/static/favicon.svg?v=__ASSET_VERSION__" type="image/svg+xml">
     <link rel="stylesheet" href="/static/styles.css?v=__ASSET_VERSION__">
   </head>
   <body>
     <a class="skip-link" href="#main-content">Bỏ qua đến nội dung chính</a>
+
     <header class="site-header">
-      <div>
-        <p class="eyebrow">IoT health edge</p>
-        <h1>Giám sát sức khỏe thử nghiệm</h1>
+      <div class="brand-block">
+        <p class="eyebrow">NT532 · Công nghệ IoT hiện đại</p>
+        <h1>Bàn điều khiển độ tin cậy MQTT</h1>
+        <p class="lede">Theo dõi node, Edge và bằng chứng thí nghiệm trong cùng một dòng thời gian.</p>
       </div>
-      <div id="connection-pill" class="status-pill status-waiting" role="status">
-        <span aria-hidden="true">●</span>
-        <span id="connection-text">Đang kết nối</span>
+      <div class="header-clock" aria-label="Trạng thái làm mới">
+        <span class="header-clock__label">Lần đồng bộ giao diện</span>
+        <strong id="refresh-time">Chưa đồng bộ</strong>
       </div>
     </header>
 
     <aside class="warning-banner" aria-label="Cảnh báo phạm vi sử dụng">
-      <strong>Prototype phi lâm sàng</strong>
-      <span>Không dùng số liệu hoặc cảnh báo của hệ thống để chẩn đoán hay xử trí y tế.</span>
+      <span class="warning-banner__code" aria-hidden="true">NC</span>
+      <div>
+        <strong>Prototype phi lâm sàng</strong>
+        <span>Không dùng số liệu hoặc cảnh báo của hệ thống để chẩn đoán hay xử trí y tế.</span>
+      </div>
     </aside>
 
-    <main id="main-content">
-      <section class="toolbar" aria-labelledby="device-heading">
-        <div>
-          <h2 id="device-heading">Thiết bị</h2>
-          <p id="last-update" class="muted">Chưa nhận dữ liệu</p>
-        </div>
-        <label>
-          <span class="sr-only">Chọn thiết bị</span>
-          <select id="device-select" aria-label="Chọn thiết bị">
-            <option value="">Đang tải thiết bị…</option>
-          </select>
-        </label>
+    <main id="main-content" tabindex="-1">
+      <section class="status-rail" aria-label="Trạng thái hệ thống">
+        <article class="status-module" aria-labelledby="edge-state-heading">
+          <div class="status-module__heading">
+            <h2 id="edge-state-heading">Edge</h2>
+            <span id="edge-status-pill" class="state-badge state-unknown">
+              <span class="state-mark" aria-hidden="true"></span>
+              <span id="edge-status-text">Đang kiểm tra</span>
+            </span>
+          </div>
+          <p id="edge-status-detail" class="status-detail">Chưa có phản hồi từ runtime.</p>
+        </article>
+
+        <article class="status-module" aria-labelledby="node-state-heading">
+          <div class="status-module__heading">
+            <h2 id="node-state-heading">Node cảm biến</h2>
+            <span id="connection-pill" class="state-badge state-unknown">
+              <span class="state-mark" aria-hidden="true"></span>
+              <span id="connection-text">Chưa xác định</span>
+            </span>
+          </div>
+          <p id="last-update" class="status-detail">Chưa nhận dữ liệu từ thiết bị.</p>
+        </article>
+
+        <article class="status-module" aria-labelledby="experiment-state-heading">
+          <div class="status-module__heading">
+            <h2 id="experiment-state-heading">Bằng chứng</h2>
+            <span id="experiment-status" class="state-badge state-unknown">
+              <span class="state-mark" aria-hidden="true"></span>
+              <span id="experiment-status-text">Chưa chọn run</span>
+            </span>
+          </div>
+          <p id="experiment-status-detail" class="status-detail">Chỉ hiển thị dữ liệu đã được runner ghi lại.</p>
+        </article>
       </section>
 
-      <p id="latest-data-state" class="cache-notice" role="status" aria-live="polite" hidden>
+      <section class="control-deck" aria-labelledby="control-heading">
+        <div class="section-title">
+          <div>
+            <p class="eyebrow">Ngữ cảnh quan sát</p>
+            <h2 id="control-heading">Chọn thiết bị và bộ minh chứng</h2>
+          </div>
+          <button id="refresh-button" class="button button-secondary" type="button">
+            Làm mới dữ liệu
+          </button>
+        </div>
+
+        <div class="control-grid">
+          <label class="field-control">
+            <span>Thiết bị</span>
+            <select id="device-select" name="device" autocomplete="off">
+              <option value="">Đang tải thiết bị…</option>
+            </select>
+          </label>
+
+          <label class="field-control">
+            <span>Run thí nghiệm</span>
+            <select id="run-select" name="run" autocomplete="off">
+              <option value="">Đang tải bộ minh chứng…</option>
+            </select>
+          </label>
+
+          <label class="field-control">
+            <span>Hồ sơ kiểm thử</span>
+            <select id="profile-select" name="profile" autocomplete="off">
+              <option value="">Tất cả hồ sơ</option>
+            </select>
+          </label>
+
+          <label class="field-control field-control--compact">
+            <span>Khung dữ liệu</span>
+            <select id="window-select" name="window" autocomplete="off">
+              <option value="15m">15 phút</option>
+              <option value="60m">60 phút</option>
+              <option value="360m">6 giờ</option>
+              <option value="1440m">24 giờ</option>
+            </select>
+          </label>
+
+          <label class="field-control field-control--compact">
+            <span>Chỉ số biểu diễn</span>
+            <select id="chart-metric" name="metric" autocomplete="off">
+              <option value="heart_rate_bpm">Nhịp tim</option>
+              <option value="spo2_pct">SpO₂</option>
+              <option value="wrist_surface_temp_c">Nhiệt độ bề mặt cổ tay</option>
+            </select>
+          </label>
+        </div>
+      </section>
+
+      <section class="protocol-strip" aria-labelledby="protocol-heading">
+        <div class="protocol-strip__title">
+          <p class="eyebrow">Giao thức và runtime</p>
+          <h2 id="protocol-heading">Dấu vết truyền thông</h2>
+        </div>
+        <dl class="protocol-facts">
+          <div>
+            <dt>Giao thức cấu hình</dt>
+            <dd id="protocol-value">Chưa công bố</dd>
+          </div>
+          <div>
+            <dt>Topic namespace</dt>
+            <dd id="topic-namespace" translate="no">Chưa công bố</dd>
+          </div>
+          <div>
+            <dt>MQTT quan sát</dt>
+            <dd id="mqtt-observed">Chưa xác nhận</dd>
+          </div>
+          <div>
+            <dt>Điểm chèn lỗi</dt>
+            <dd id="injection-point">Không áp dụng</dd>
+          </div>
+        </dl>
+      </section>
+
+      <p id="impairment-notice" class="impairment-notice" role="note" hidden>
+        <strong>Mô phỏng lỗi ở tầng ứng dụng</strong>
+        <span>Không phải packet loss đo được và không phải phép đo mạng 5G.</span>
+      </p>
+
+      <p id="latest-data-state" class="cache-notice" role="status" hidden>
         <strong>Dữ liệu cũ</strong>
         <span>Các giá trị bên dưới là lần ghi nhận cuối, không phải dữ liệu trực tiếp.</span>
       </p>
 
-      <section class="metric-grid" aria-label="Số đo mới nhất">
-        <article class="metric-card">
+      <section class="measurement-heading" aria-labelledby="measurement-heading">
+        <div>
+          <p class="eyebrow">Telemetry mới nhất</p>
+          <h2 id="measurement-heading">Số đo tham khảo</h2>
+        </div>
+        <span id="measurement-state" class="state-badge state-unknown">
+          <span class="state-mark" aria-hidden="true"></span>
+          <span id="measurement-state-text">Chưa có dữ liệu</span>
+        </span>
+      </section>
+
+      <section class="metric-grid" aria-label="Ba số đo mới nhất">
+        <article class="metric-card metric-card--primary">
           <div class="metric-heading">
             <h2>Nhịp tim</h2>
             <span id="heart-quality" class="quality-label">Chưa có dữ liệu</span>
@@ -74,11 +201,110 @@
         </article>
       </section>
 
-      <section class="detail-grid">
-        <article class="panel quality-panel" aria-labelledby="quality-heading">
-          <div class="section-heading">
+      <section class="experiment-panel" aria-labelledby="kpi-heading">
+        <div class="section-title">
+          <div>
+            <p class="eyebrow">Run đã chọn</p>
+            <h2 id="kpi-heading">KPI độ tin cậy</h2>
+          </div>
+          <div class="run-heading-meta">
+            <span id="kpi-claim-label" class="claim-label" hidden>Mô phỏng tầng ứng dụng · network_claim=none</span>
+            <p id="experiment-identity" class="run-identity" translate="no">Không có run</p>
+          </div>
+        </div>
+
+        <div id="experiment-empty" class="empty-state">
+          Chưa có bộ minh chứng phù hợp. Chạy runner bên ngoài dashboard rồi làm mới dữ liệu.
+        </div>
+
+        <div id="experiment-content" hidden>
+          <dl class="kpi-grid">
+            <div class="kpi-cell">
+              <dt>Tỷ lệ scheduled → API observed</dt>
+              <dd id="kpi-delivery-ratio">—</dd>
+              <span id="kpi-delivery-detail">Chưa có mẫu số</span>
+            </div>
+            <div class="kpi-cell">
+              <dt>Logical message</dt>
+              <dd id="kpi-observed">—</dd>
+              <span id="kpi-attempts">Chưa có attempt</span>
+            </div>
+            <div class="kpi-cell">
+              <dt>p50 schedule → API upper-bound</dt>
+              <dd id="kpi-p50">—</dd>
+              <span>Upper-bound do polling</span>
+            </div>
+            <div class="kpi-cell">
+              <dt>p95 schedule → API upper-bound</dt>
+              <dd id="kpi-p95">—</dd>
+              <span>Upper-bound do polling</span>
+            </div>
+          </dl>
+          <dl class="experiment-meta">
+            <div><dt>Scenario</dt><dd id="experiment-scenario">—</dd></div>
+            <div><dt>Profile</dt><dd id="experiment-profile">—</dd></div>
+            <div><dt>Clock domain</dt><dd id="experiment-clock">—</dd></div>
+            <div><dt>Độ phân giải polling</dt><dd id="experiment-polling">—</dd></div>
+            <div><dt>Độ trễ chính</dt><dd id="experiment-primary-latency">—</dd></div>
+            <div><dt>Độ trễ chẩn đoán</dt><dd id="experiment-diagnostic-latency">—</dd></div>
+          </dl>
+        </div>
+      </section>
+
+      <section class="workspace-grid">
+        <article class="panel chart-panel" aria-labelledby="chart-heading">
+          <div class="section-title section-title--compact">
             <div>
-              <p class="eyebrow">Chất lượng dữ liệu</p>
+              <p id="chart-window-label" class="eyebrow">15 phút gần nhất</p>
+              <h2 id="chart-heading">Xu hướng theo thời gian</h2>
+            </div>
+            <div class="chart-labels">
+              <span class="source-label">Nguồn: telemetry node · không thuộc run đã chọn</span>
+              <span class="legend-item"><span class="legend-line" aria-hidden="true"></span>Mẫu hợp lệ</span>
+            </div>
+          </div>
+
+          <p id="chart-coverage" class="coverage-note">Chưa có metadata độ phủ.</p>
+          <div id="chart-empty" class="chart-empty">Chưa đủ dữ liệu hợp lệ để vẽ biểu đồ.</div>
+          <svg id="chart" class="chart" viewBox="0 0 900 300" role="img" aria-labelledby="chart-title chart-desc">
+            <title id="chart-title">Biểu đồ xu hướng số đo theo thời gian</title>
+            <desc id="chart-desc">Chưa có dữ liệu.</desc>
+            <g aria-hidden="true">
+              <line class="grid-line" x1="64" y1="28" x2="876" y2="28"></line>
+              <line class="grid-line" x1="64" y1="137" x2="876" y2="137"></line>
+              <line class="grid-line" x1="64" y1="246" x2="876" y2="246"></line>
+              <text id="chart-max" class="axis-label" x="4" y="34">—</text>
+              <text id="chart-mid" class="axis-label" x="4" y="143">—</text>
+              <text id="chart-min" class="axis-label" x="4" y="252">—</text>
+              <text id="chart-start-time" class="axis-label axis-label--time" x="64" y="282">—</text>
+              <text id="chart-end-time" class="axis-label axis-label--time" x="876" y="282" text-anchor="end">—</text>
+            </g>
+            <g id="chart-series" aria-hidden="true"></g>
+          </svg>
+
+          <details class="data-disclosure">
+            <summary>Xem bảng dữ liệu tương đương</summary>
+            <div class="table-wrap" tabindex="0" aria-label="Bảng dữ liệu biểu đồ có thể cuộn ngang">
+              <table>
+                <caption id="chart-table-caption">Các mẫu đang được biểu diễn trên biểu đồ.</caption>
+                <thead>
+                  <tr>
+                    <th scope="col">Thời gian cục bộ</th>
+                    <th scope="col">Giá trị</th>
+                    <th scope="col">Chất lượng</th>
+                    <th scope="col">Sequence</th>
+                  </tr>
+                </thead>
+                <tbody id="chart-table-body"></tbody>
+              </table>
+            </div>
+          </details>
+        </article>
+
+        <article class="panel quality-panel" aria-labelledby="quality-heading">
+          <div class="section-title section-title--compact">
+            <div>
+              <p class="eyebrow">Chất lượng và session</p>
               <h2 id="quality-heading">Tình trạng phép đo</h2>
             </div>
             <span id="quality-summary" class="quality-badge">Chưa có dữ liệu</span>
@@ -89,55 +315,27 @@
             <div><dt>Nhiễu chuyển động</dt><dd id="motion-artifact">—</dd></div>
             <div><dt>Trạng thái ngã</dt><dd id="fall-state">—</dd></div>
             <div><dt>Wi‑Fi</dt><dd id="rssi">—</dd></div>
-            <div><dt>Firmware</dt><dd id="firmware">—</dd></div>
+            <div><dt>Firmware</dt><dd id="firmware" translate="no">—</dd></div>
+            <div><dt>Boot/session</dt><dd id="boot-id" translate="no">—</dd></div>
           </dl>
-        </article>
-
-        <article class="panel chart-panel" aria-labelledby="chart-heading">
-          <div class="section-heading">
-            <div>
-              <p class="eyebrow">15 phút gần nhất</p>
-              <h2 id="chart-heading">Xu hướng số đo</h2>
-            </div>
-            <label class="chart-control">
-              <span class="sr-only">Chọn số đo biểu diễn</span>
-              <select id="chart-metric">
-                <option value="heart_rate_bpm">Nhịp tim</option>
-                <option value="spo2_pct">SpO₂</option>
-                <option value="wrist_surface_temp_c">Nhiệt độ bề mặt cổ tay</option>
-              </select>
-            </label>
-          </div>
-          <div id="chart-empty" class="chart-empty">Chưa đủ dữ liệu để vẽ biểu đồ.</div>
-          <svg id="chart" class="chart" viewBox="0 0 800 250" role="img" aria-labelledby="chart-title chart-desc">
-            <title id="chart-title">Biểu đồ xu hướng 15 phút</title>
-            <desc id="chart-desc">Chưa có dữ liệu.</desc>
-            <line class="grid-line" x1="52" y1="24" x2="780" y2="24"></line>
-            <line class="grid-line" x1="52" y1="119" x2="780" y2="119"></line>
-            <line class="grid-line" x1="52" y1="214" x2="780" y2="214"></line>
-            <text id="chart-max" class="axis-label" x="4" y="29">—</text>
-            <text id="chart-mid" class="axis-label" x="4" y="124">—</text>
-            <text id="chart-min" class="axis-label" x="4" y="219">—</text>
-            <polyline id="chart-line" class="chart-line" points=""></polyline>
-          </svg>
         </article>
       </section>
 
       <section class="panel alerts-panel" aria-labelledby="alerts-heading">
-        <div class="section-heading">
+        <div class="section-title section-title--compact">
           <div>
             <p class="eyebrow">Cần chú ý</p>
             <h2 id="alerts-heading">Cảnh báo đang hoạt động</h2>
           </div>
           <span id="alert-count" class="count-badge">0 cảnh báo</span>
         </div>
-        <div id="active-alerts" class="alert-list" aria-live="polite">
+        <div id="active-alerts" class="alert-list">
           <p class="empty-state">Chưa có cảnh báo đang hoạt động.</p>
         </div>
       </section>
 
       <section class="panel alerts-panel" aria-labelledby="history-heading">
-        <div class="section-heading">
+        <div class="section-title section-title--compact">
           <div>
             <p class="eyebrow">Lịch sử gần đây</p>
             <h2 id="history-heading">Cảnh báo đã kết thúc</h2>
@@ -149,10 +347,37 @@
       </section>
 
       <p id="dashboard-message" class="dashboard-message" role="status" aria-live="polite"></p>
+      <p id="state-announcer" class="sr-only" aria-live="polite" aria-atomic="true"></p>
     </main>
 
+    <dialog id="ack-dialog" class="ack-dialog" aria-labelledby="ack-dialog-title" aria-describedby="ack-dialog-description">
+      <form id="ack-form" method="dialog">
+        <div class="dialog-header">
+          <p class="eyebrow">Xác nhận thao tác</p>
+          <h2 id="ack-dialog-title">Đánh dấu cảnh báo đã xem</h2>
+        </div>
+        <p id="ack-dialog-description">
+          “Đã xem” chỉ ghi nhận thao tác trên dashboard; không có nghĩa tình trạng đã được xử lý.
+        </p>
+        <label class="field-control">
+          <span>Người đánh dấu</span>
+          <input id="ack-actor" name="actor" type="text" autocomplete="off" spellcheck="false" maxlength="80" required>
+        </label>
+        <label class="field-control">
+          <span>Ghi chú <small>(không bắt buộc)</small></span>
+          <textarea id="ack-note" name="note" rows="3" maxlength="240"></textarea>
+        </label>
+        <p id="ack-error" class="form-error" role="alert"></p>
+        <div class="dialog-actions">
+          <button id="ack-cancel" class="button button-secondary" type="button">Hủy</button>
+          <button id="ack-confirm" class="button button-primary" type="submit">Ghi nhận đã xem</button>
+        </div>
+      </form>
+    </dialog>
+
     <footer>
-      Dữ liệu lưu cục bộ trên laptop edge. Nút “Đã xem” không có nghĩa cảnh báo đã được xử lý.
+      <span>Dữ liệu lưu cục bộ trên laptop Edge.</span>
+      <span>Dashboard không tự chạy thí nghiệm và không gửi lệnh đến phần cứng.</span>
     </footer>
     <script src="/static/app.js?v=__ASSET_VERSION__" defer></script>
   </body>

@@ -1,0 +1,536 @@
+{
+  "artifact_version": "1.0",
+  "implementation": "hardened",
+  "commit": "7030e4b30300dec65646e3091356ca00d9eaa8f5",
+  "baseline_commit": "7030e4b30300dec65646e3091356ca00d9eaa8f5",
+  "source_provenance": {
+    "head_commit": "7030e4b30300dec65646e3091356ca00d9eaa8f5",
+    "source_state": "worktree_uncommitted",
+    "rq1_source_files": [
+      "edge/db.py",
+      "edge/rules.py",
+      "edge/service.py",
+      "edge/mqtt_client.py"
+    ],
+    "rq1_source_sha256": "4bce098e63c53ab20bc7d9ab37162848504160b620c4a1a7ebba6ccfe7de5419"
+  },
+  "repetitions": 30,
+  "deterministic_repeatability_only": true,
+  "inferential_confidence_interval": null,
+  "cases": {
+    "atomic_alert_passed": 30,
+    "old_lwt_session_passed": 30
+  },
+  "runs": [
+    {
+      "repetition": 1,
+      "atomic_alert": {
+        "pass": true,
+        "retry_accepted": true,
+        "retry_duplicate": false,
+        "telemetry_count": 1,
+        "alert_count": 1,
+        "alert_history_count": 1
+      },
+      "old_lwt_session": {
+        "pass": true,
+        "current_boot_id": "boot-b",
+        "online": true,
+        "stale_disposition": "stale"
+      }
+    },
+    {
+      "repetition": 2,
+      "atomic_alert": {
+        "pass": true,
+        "retry_accepted": true,
+        "retry_duplicate": false,
+        "telemetry_count": 1,
+        "alert_count": 1,
+        "alert_history_count": 1
+      },
+      "old_lwt_session": {
+        "pass": true,
+        "current_boot_id": "boot-b",
+        "online": true,
+        "stale_disposition": "stale"
+      }
+    },
+    {
+      "repetition": 3,
+      "atomic_alert": {
+        "pass": true,
+        "retry_accepted": true,
+        "retry_duplicate": false,
+        "telemetry_count": 1,
+        "alert_count": 1,
+        "alert_history_count": 1
+      },
+      "old_lwt_session": {
+        "pass": true,
+        "current_boot_id": "boot-b",
+        "online": true,
+        "stale_disposition": "stale"
+      }
+    },
+    {
+      "repetition": 4,
+      "atomic_alert": {
+        "pass": true,
+        "retry_accepted": true,
+        "retry_duplicate": false,
+        "telemetry_count": 1,
+        "alert_count": 1,
+        "alert_history_count": 1
+      },
+      "old_lwt_session": {
+        "pass": true,
+        "current_boot_id": "boot-b",
+        "online": true,
+        "stale_disposition": "stale"
+      }
+    },
+    {
+      "repetition": 5,
+      "atomic_alert": {
+        "pass": true,
+        "retry_accepted": true,
+        "retry_duplicate": false,
+        "telemetry_count": 1,
+        "alert_count": 1,
+        "alert_history_count": 1
+      },
+      "old_lwt_session": {
+        "pass": true,
+        "current_boot_id": "boot-b",
+        "online": true,
+        "stale_disposition": "stale"
+      }
+    },
+    {
+      "repetition": 6,
+      "atomic_alert": {
+        "pass": true,
+        "retry_accepted": true,
+        "retry_duplicate": false,
+        "telemetry_count": 1,
+        "alert_count": 1,
+        "alert_history_count": 1
+      },
+      "old_lwt_session": {
+        "pass": true,
+        "current_boot_id": "boot-b",
+        "online": true,
+        "stale_disposition": "stale"
+      }
+    },
+    {
+      "repetition": 7,
+      "atomic_alert": {
+        "pass": true,
+        "retry_accepted": true,
+        "retry_duplicate": false,
+        "telemetry_count": 1,
+        "alert_count": 1,
+        "alert_history_count": 1
+      },
+      "old_lwt_session": {
+        "pass": true,
+        "current_boot_id": "boot-b",
+        "online": true,
+        "stale_disposition": "stale"
+      }
+    },
+    {
+      "repetition": 8,
+      "atomic_alert": {
+        "pass": true,
+        "retry_accepted": true,
+        "retry_duplicate": false,
+        "telemetry_count": 1,
+        "alert_count": 1,
+        "alert_history_count": 1
+      },
+      "old_lwt_session": {
+        "pass": true,
+        "current_boot_id": "boot-b",
+        "online": true,
+        "stale_disposition": "stale"
+      }
+    },
+    {
+      "repetition": 9,
+      "atomic_alert": {
+        "pass": true,
+        "retry_accepted": true,
+        "retry_duplicate": false,
+        "telemetry_count": 1,
+        "alert_count": 1,
+        "alert_history_count": 1
+      },
+      "old_lwt_session": {
+        "pass": true,
+        "current_boot_id": "boot-b",
+        "online": true,
+        "stale_disposition": "stale"
+      }
+    },
+    {
+      "repetition": 10,
+      "atomic_alert": {
+        "pass": true,
+        "retry_accepted": true,
+        "retry_duplicate": false,
+        "telemetry_count": 1,
+        "alert_count": 1,
+        "alert_history_count": 1
+      },
+      "old_lwt_session": {
+        "pass": true,
+        "current_boot_id": "boot-b",
+        "online": true,
+        "stale_disposition": "stale"
+      }
+    },
+    {
+      "repetition": 11,
+      "atomic_alert": {
+        "pass": true,
+        "retry_accepted": true,
+        "retry_duplicate": false,
+        "telemetry_count": 1,
+        "alert_count": 1,
+        "alert_history_count": 1
+      },
+      "old_lwt_session": {
+        "pass": true,
+        "current_boot_id": "boot-b",
+        "online": true,
+        "stale_disposition": "stale"
+      }
+    },
+    {
+      "repetition": 12,
+      "atomic_alert": {
+        "pass": true,
+        "retry_accepted": true,
+        "retry_duplicate": false,
+        "telemetry_count": 1,
+        "alert_count": 1,
+        "alert_history_count": 1
+      },
+      "old_lwt_session": {
+        "pass": true,
+        "current_boot_id": "boot-b",
+        "online": true,
+        "stale_disposition": "stale"
+      }
+    },
+    {
+      "repetition": 13,
+      "atomic_alert": {
+        "pass": true,
+        "retry_accepted": true,
+        "retry_duplicate": false,
+        "telemetry_count": 1,
+        "alert_count": 1,
+        "alert_history_count": 1
+      },
+      "old_lwt_session": {
+        "pass": true,
+        "current_boot_id": "boot-b",
+        "online": true,
+        "stale_disposition": "stale"
+      }
+    },
+    {
+      "repetition": 14,
+      "atomic_alert": {
+        "pass": true,
+        "retry_accepted": true,
+        "retry_duplicate": false,
+        "telemetry_count": 1,
+        "alert_count": 1,
+        "alert_history_count": 1
+      },
+      "old_lwt_session": {
+        "pass": true,
+        "current_boot_id": "boot-b",
+        "online": true,
+        "stale_disposition": "stale"
+      }
+    },
+    {
+      "repetition": 15,
+      "atomic_alert": {
+        "pass": true,
+        "retry_accepted": true,
+        "retry_duplicate": false,
+        "telemetry_count": 1,
+        "alert_count": 1,
+        "alert_history_count": 1
+      },
+      "old_lwt_session": {
+        "pass": true,
+        "current_boot_id": "boot-b",
+        "online": true,
+        "stale_disposition": "stale"
+      }
+    },
+    {
+      "repetition": 16,
+      "atomic_alert": {
+        "pass": true,
+        "retry_accepted": true,
+        "retry_duplicate": false,
+        "telemetry_count": 1,
+        "alert_count": 1,
+        "alert_history_count": 1
+      },
+      "old_lwt_session": {
+        "pass": true,
+        "current_boot_id": "boot-b",
+        "online": true,
+        "stale_disposition": "stale"
+      }
+    },
+    {
+      "repetition": 17,
+      "atomic_alert": {
+        "pass": true,
+        "retry_accepted": true,
+        "retry_duplicate": false,
+        "telemetry_count": 1,
+        "alert_count": 1,
+        "alert_history_count": 1
+      },
+      "old_lwt_session": {
+        "pass": true,
+        "current_boot_id": "boot-b",
+        "online": true,
+        "stale_disposition": "stale"
+      }
+    },
+    {
+      "repetition": 18,
+      "atomic_alert": {
+        "pass": true,
+        "retry_accepted": true,
+        "retry_duplicate": false,
+        "telemetry_count": 1,
+        "alert_count": 1,
+        "alert_history_count": 1
+      },
+      "old_lwt_session": {
+        "pass": true,
+        "current_boot_id": "boot-b",
+        "online": true,
+        "stale_disposition": "stale"
+      }
+    },
+    {
+      "repetition": 19,
+      "atomic_alert": {
+        "pass": true,
+        "retry_accepted": true,
+        "retry_duplicate": false,
+        "telemetry_count": 1,
+        "alert_count": 1,
+        "alert_history_count": 1
+      },
+      "old_lwt_session": {
+        "pass": true,
+        "current_boot_id": "boot-b",
+        "online": true,
+        "stale_disposition": "stale"
+      }
+    },
+    {
+      "repetition": 20,
+      "atomic_alert": {
+        "pass": true,
+        "retry_accepted": true,
+        "retry_duplicate": false,
+        "telemetry_count": 1,
+        "alert_count": 1,
+        "alert_history_count": 1
+      },
+      "old_lwt_session": {
+        "pass": true,
+        "current_boot_id": "boot-b",
+        "online": true,
+        "stale_disposition": "stale"
+      }
+    },
+    {
+      "repetition": 21,
+      "atomic_alert": {
+        "pass": true,
+        "retry_accepted": true,
+        "retry_duplicate": false,
+        "telemetry_count": 1,
+        "alert_count": 1,
+        "alert_history_count": 1
+      },
+      "old_lwt_session": {
+        "pass": true,
+        "current_boot_id": "boot-b",
+        "online": true,
+        "stale_disposition": "stale"
+      }
+    },
+    {
+      "repetition": 22,
+      "atomic_alert": {
+        "pass": true,
+        "retry_accepted": true,
+        "retry_duplicate": false,
+        "telemetry_count": 1,
+        "alert_count": 1,
+        "alert_history_count": 1
+      },
+      "old_lwt_session": {
+        "pass": true,
+        "current_boot_id": "boot-b",
+        "online": true,
+        "stale_disposition": "stale"
+      }
+    },
+    {
+      "repetition": 23,
+      "atomic_alert": {
+        "pass": true,
+        "retry_accepted": true,
+        "retry_duplicate": false,
+        "telemetry_count": 1,
+        "alert_count": 1,
+        "alert_history_count": 1
+      },
+      "old_lwt_session": {
+        "pass": true,
+        "current_boot_id": "boot-b",
+        "online": true,
+        "stale_disposition": "stale"
+      }
+    },
+    {
+      "repetition": 24,
+      "atomic_alert": {
+        "pass": true,
+        "retry_accepted": true,
+        "retry_duplicate": false,
+        "telemetry_count": 1,
+        "alert_count": 1,
+        "alert_history_count": 1
+      },
+      "old_lwt_session": {
+        "pass": true,
+        "current_boot_id": "boot-b",
+        "online": true,
+        "stale_disposition": "stale"
+      }
+    },
+    {
+      "repetition": 25,
+      "atomic_alert": {
+        "pass": true,
+        "retry_accepted": true,
+        "retry_duplicate": false,
+        "telemetry_count": 1,
+        "alert_count": 1,
+        "alert_history_count": 1
+      },
+      "old_lwt_session": {
+        "pass": true,
+        "current_boot_id": "boot-b",
+        "online": true,
+        "stale_disposition": "stale"
+      }
+    },
+    {
+      "repetition": 26,
+      "atomic_alert": {
+        "pass": true,
+        "retry_accepted": true,
+        "retry_duplicate": false,
+        "telemetry_count": 1,
+        "alert_count": 1,
+        "alert_history_count": 1
+      },
+      "old_lwt_session": {
+        "pass": true,
+        "current_boot_id": "boot-b",
+        "online": true,
+        "stale_disposition": "stale"
+      }
+    },
+    {
+      "repetition": 27,
+      "atomic_alert": {
+        "pass": true,
+        "retry_accepted": true,
+        "retry_duplicate": false,
+        "telemetry_count": 1,
+        "alert_count": 1,
+        "alert_history_count": 1
+      },
+      "old_lwt_session": {
+        "pass": true,
+        "current_boot_id": "boot-b",
+        "online": true,
+        "stale_disposition": "stale"
+      }
+    },
+    {
+      "repetition": 28,
+      "atomic_alert": {
+        "pass": true,
+        "retry_accepted": true,
+        "retry_duplicate": false,
+        "telemetry_count": 1,
+        "alert_count": 1,
+        "alert_history_count": 1
+      },
+      "old_lwt_session": {
+        "pass": true,
+        "current_boot_id": "boot-b",
+        "online": true,
+        "stale_disposition": "stale"
+      }
+    },
+    {
+      "repetition": 29,
+      "atomic_alert": {
+        "pass": true,
+        "retry_accepted": true,
+        "retry_duplicate": false,
+        "telemetry_count": 1,
+        "alert_count": 1,
+        "alert_history_count": 1
+      },
+      "old_lwt_session": {
+        "pass": true,
+        "current_boot_id": "boot-b",
+        "online": true,
+        "stale_disposition": "stale"
+      }
+    },
+    {
+      "repetition": 30,
+      "atomic_alert": {
+        "pass": true,
+        "retry_accepted": true,
+        "retry_duplicate": false,
+        "telemetry_count": 1,
+        "alert_count": 1,
+        "alert_history_count": 1
+      },
+      "old_lwt_session": {
+        "pass": true,
+        "current_boot_id": "boot-b",
+        "online": true,
+        "stale_disposition": "stale"
+      }
+    }
+  ]
+}

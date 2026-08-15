@@ -1,0 +1,66 @@
+{
+  "artifact_version": "5.0",
+  "run_id": "acceptance-dry-remote-20260814",
+  "status": "planned",
+  "created_at": "2026-08-14T00:35:04.108Z",
+  "completed_at": "2026-08-14T00:35:04.113Z",
+  "profile": {
+    "name": "remote-app-emulated",
+    "version": "1.0",
+    "description_vi": "Nhiễu tầng ứng dụng tái lập trước MQTT publish; không phải packet loss, network emulator hoặc phép đo 5G.",
+    "base_delay_ms": 85,
+    "jitter_ms": 35,
+    "intentional_drop_rate": 0.08,
+    "outage_fraction": 0.1,
+    "profile_kind": "app_impairment",
+    "network_claim": "none",
+    "injection_point": "before_mqtt_publish"
+  },
+  "scenario": "normal",
+  "seed": 20260814,
+  "count": 30,
+  "interval_seconds": 0.25,
+  "protocol": {
+    "name": "MQTT",
+    "version": "3.1.1",
+    "transport": "TCP"
+  },
+  "topic_namespace": "iot-health/v1/devices/{device_id}/{stream}",
+  "device_id": "health-node-01",
+  "boot_id": "2e629bdf5c84552d84ad4b6cf3baf127",
+  "schema": "health.telemetry.v3",
+  "commit": "7030e4b30300dec65646e3091356ca00d9eaa8f5",
+  "source_provenance": {
+    "scope": "runner_source_fingerprint",
+    "head_commit": "7030e4b30300dec65646e3091356ca00d9eaa8f5",
+    "source_state": "worktree_uncommitted",
+    "source_sha256": "f5e27d518f9a625397f289f90fd42bac9cf89d628c8e820a18ce55dfdacde280",
+    "source_files": [
+      "pyproject.toml",
+      "edge/app.py",
+      "edge/config.py",
+      "edge/db.py",
+      "edge/experiments.py",
+      "edge/mqtt_client.py",
+      "edge/rules.py",
+      "edge/schemas.py",
+      "edge/service.py",
+      "simulator/experiment.py",
+      "simulator/aggregate.py",
+      "simulator/mqtt_simulator.py",
+      "simulator/network_profiles.py"
+    ]
+  },
+  "config_hash": "0e968e6a6fca97deede8045958488220c5b016a74ea1037b8bd649876053ac82",
+  "clock_domain": "host_monotonic_same_process",
+  "polling_resolution_ms": 100,
+  "observe_timeout_seconds": 5.0,
+  "injection_point": "before_mqtt_publish",
+  "claims": {
+    "profile_kind": "app_impairment",
+    "network_claim": "none",
+    "measured_5g": false,
+    "primary_latency_kind": "schedule_to_api_polling_upper_bound",
+    "diagnostic_latency_kind": "publish_to_api_polling_upper_bound"
+  }
+}

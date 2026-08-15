@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from edge.config import DemoRuleSettings
 from edge.db import Database
 from edge.rules import RuleEngine
@@ -118,7 +120,9 @@ def test_v3_invalid_wrist_surface_flag_pair_is_rejected(
     assert "must be null" in result.error
 
 
-def test_duplicate_telemetry_does_not_rewind_device_liveness(tmp_path, clone_payload):
+def test_superseded_telemetry_is_stale_and_does_not_rewind_device_liveness(
+    tmp_path, clone_payload
+):
     database, service = make_service(tmp_path)
     start = datetime(2026, 8, 4, 12, 0, tzinfo=UTC)
     boot_a = clone_payload()
@@ -137,7 +141,8 @@ def test_duplicate_telemetry_does_not_rewind_device_liveness(tmp_path, clone_pay
     )
     after_replay = database.get_device("health-node-01")
 
-    assert replay.accepted and replay.duplicate
+    assert replay.accepted and replay.disposition == "stale"
+    assert not replay.duplicate
     assert after_replay["boot_id"] == "boot-b"
     assert after_replay["last_seen_at"] == current["last_seen_at"]
     assert after_replay["updated_at"] == current["updated_at"]
@@ -378,20 +383,367 @@ def test_new_fall_event_reopens_acknowledged_alert(tmp_path):
 
 def test_status_updates_online_state(tmp_path):
     database, service = make_service(tmp_path)
-    payload = {
+    online = {
         "schema": "health.status.v1",
         "device_id": "health-node-01",
         "boot_id": "boot-1",
+        "seq": 1,
+        "uptime_ms": 1000,
+        "online": True,
+        "reason": "connected",
+        "system": {"rssi_dbm": -64, "free_heap": 28000, "fw": "0.1.0", "faults": []},
+    }
+    offline = {
+        **online,
         "seq": 2,
         "uptime_ms": 2000,
         "online": False,
         "reason": "lwt",
-        "system": {"rssi_dbm": -64, "free_heap": 28000, "fw": "0.1.0", "faults": []},
     }
 
-    result = service.process_message(message("status", payload))
+    assert service.process_message(message("status", online)).accepted
+    result = service.process_message(message("status", offline))
 
     assert result.accepted
     device = database.get_device("health-node-01")
     assert device["online"] is False
     assert device["status_reason"] == "lwt"
+
+
+def test_unknown_offline_lwt_is_stale_and_does_not_create_device(tmp_path):
+    database, service = make_service(tmp_path)
+    payload = {
+        "schema": "health.status.v1",
+        "device_id": "health-node-01",
+        "boot_id": "boot-old",
+        "seq": 9,
+        "uptime_ms": 9000,
+        "online": False,
+        "reason": "connection_lost",
+        "system": {"rssi_dbm": None, "free_heap": None, "fw": "0.1.0", "faults": []},
+    }
+
+    result = service.process_message(message("status", payload))
+
+    assert result.accepted and result.disposition == "stale"
+    assert database.get_device("health-node-01") is None
+    assert service.metrics()["stale"] == 1
+
+
+def test_old_lwt_after_new_boot_cannot_rewind_current_session(tmp_path, clone_payload):
+    database, service = make_service(tmp_path)
+    start = datetime(2026, 8, 4, 12, 0, tzinfo=UTC)
+    online_a = {
+        "schema": "health.status.v1",
+        "device_id": "health-node-01",
+        "boot_id": "boot-a",
+        "seq": 1,
+        "uptime_ms": 1000,
+        "online": True,
+        "reason": "connected",
+        "system": {"rssi_dbm": -60, "free_heap": 30000, "fw": "0.1.0", "faults": []},
+    }
+    telemetry_b = clone_payload()
+    telemetry_b["boot_id"] = "boot-b"
+    telemetry_b["seq"] = 1
+    old_lwt = {**online_a, "seq": 2, "online": False, "reason": "connection_lost"}
+
+    assert service.process_message(message("status", online_a, start)).disposition == "accepted"
+    assert service.process_message(
+        message("telemetry", telemetry_b, start + timedelta(seconds=1))
+    ).disposition == "accepted"
+    restarted = IngestionService(
+        database,
+        RuleEngine(database, DemoRuleSettings(hold_seconds=0.0)),
+    )
+    result = restarted.process_message(
+        message("status", old_lwt, start + timedelta(seconds=2))
+    )
+
+    device = database.get_device("health-node-01")
+    assert result.disposition == "stale"
+    assert device["boot_id"] == "boot-b"
+    assert device["online"] is True
+
+
+def test_current_boot_lwt_uses_connection_epoch_not_payload_sequence(tmp_path):
+    database, service = make_service(tmp_path)
+    start = datetime(2026, 8, 4, 12, 0, tzinfo=UTC)
+
+    def status(seq, online, reason):
+        return {
+            "schema": "health.status.v1",
+            "device_id": "health-node-01",
+            "boot_id": "boot-1",
+            "seq": seq,
+            "uptime_ms": seq * 1000,
+            "online": online,
+            "reason": reason,
+            "system": {
+                "rssi_dbm": -60 if online else None,
+                "free_heap": 30000 if online else None,
+                "fw": "0.3.1",
+                "faults": [],
+            },
+        }
+
+    assert service.process_message(
+        message("status", status(10, True, "connected"), start)
+    ).disposition == "accepted"
+
+    # Firmware builds the retained LWT before publishing online=connected, so
+    # its payload sequence is exactly one lower than that connection's status.
+    first_lwt = service.process_message(
+        message(
+            "status",
+            status(9, False, "mqtt_lost"),
+            start + timedelta(seconds=1),
+        )
+    )
+    assert first_lwt.disposition == "accepted"
+    assert database.get_device("health-node-01")["online"] is False
+
+    assert service.process_message(
+        message(
+            "status",
+            status(20, True, "connected"),
+            start + timedelta(seconds=2),
+        )
+    ).disposition == "accepted"
+    assert database.get_device("health-node-01")["online"] is True
+
+    late_old_lwt = service.process_message(
+        message(
+            "status",
+            status(9, False, "mqtt_lost"),
+            start + timedelta(seconds=3),
+        )
+    )
+    assert late_old_lwt.disposition == "out_of_order"
+    assert database.get_device("health-node-01")["online"] is True
+
+    current_lwt = service.process_message(
+        message(
+            "status",
+            status(19, False, "mqtt_lost"),
+            start + timedelta(seconds=4),
+        )
+    )
+    assert current_lwt.disposition == "accepted"
+    assert database.get_device("health-node-01")["online"] is False
+
+    with database.connection() as connection:
+        session = connection.execute(
+            """
+            SELECT connection_epoch, expected_lwt_seq, last_status_seq
+            FROM device_sessions
+            WHERE device_id = ? AND boot_id = ?
+            """,
+            ("health-node-01", "boot-1"),
+        ).fetchone()
+    assert dict(session) == {
+        "connection_epoch": 2,
+        "expected_lwt_seq": 19,
+        "last_status_seq": 20,
+    }
+
+
+def test_migrated_unknown_status_watermark_cannot_rewind_online_state(tmp_path):
+    database, service = make_service(tmp_path)
+    start = datetime(2026, 8, 4, 12, 0, tzinfo=UTC)
+    online = {
+        "schema": "health.status.v1",
+        "device_id": "health-node-01",
+        "boot_id": "boot-1",
+        "seq": 10,
+        "uptime_ms": 10000,
+        "online": True,
+        "reason": "heartbeat",
+        "system": {"rssi_dbm": -60, "free_heap": 30000, "fw": "0.3.1", "faults": []},
+    }
+    assert service.process_message(message("status", online, start)).accepted
+
+    with database.connection() as connection:
+        connection.execute("DROP TABLE device_sessions")
+        connection.commit()
+    database.initialize()
+    restarted = IngestionService(
+        database,
+        RuleEngine(database, DemoRuleSettings(hold_seconds=0.0)),
+    )
+
+    unanchored_offline = {
+        **online,
+        "seq": 1,
+        "online": False,
+        "reason": "simulator_complete",
+    }
+    result = restarted.process_message(
+        message("status", unanchored_offline, start + timedelta(seconds=1))
+    )
+    assert result.disposition == "out_of_order"
+    assert database.get_device("health-node-01")["online"] is True
+
+    heartbeat = {**online, "seq": 11}
+    assert restarted.process_message(
+        message("status", heartbeat, start + timedelta(seconds=2))
+    ).disposition == "accepted"
+    ordered_offline = {
+        **heartbeat,
+        "seq": 12,
+        "online": False,
+        "reason": "simulator_complete",
+    }
+    assert restarted.process_message(
+        message("status", ordered_offline, start + timedelta(seconds=3))
+    ).disposition == "accepted"
+    assert database.get_device("health-node-01")["online"] is False
+
+
+def test_sequence_is_classified_independently_per_stream(tmp_path, clone_payload):
+    database, service = make_service(tmp_path)
+    start = datetime(2026, 8, 4, 12, 0, tzinfo=UTC)
+    status = {
+        "schema": "health.status.v1",
+        "device_id": "health-node-01",
+        "boot_id": "boot-1",
+        "seq": 10,
+        "uptime_ms": 1000,
+        "online": True,
+        "reason": "connected",
+        "system": {"rssi_dbm": -60, "free_heap": 30000, "fw": "0.1.0", "faults": []},
+    }
+    telemetry = clone_payload()
+    telemetry["boot_id"] = "boot-1"
+    telemetry["seq"] = 2
+
+    assert service.process_message(message("status", status, start)).disposition == "accepted"
+    assert service.process_message(
+        message("telemetry", telemetry, start + timedelta(seconds=1))
+    ).disposition == "accepted"
+    event = {
+        "schema": "health.event.v1",
+        "device_id": "health-node-01",
+        "boot_id": "boot-1",
+        "event_id": "evt-stream-1",
+        "seq": 1,
+        "uptime_ms": 1500,
+        "type": "fall_suspected_demo",
+    }
+    assert service.process_message(
+        message("event", event, start + timedelta(milliseconds=1500))
+    ).disposition == "accepted"
+
+    older_telemetry = json.loads(json.dumps(telemetry))
+    older_telemetry["seq"] = 1
+    older_status = {**status, "seq": 9, "online": False, "reason": "late_lwt"}
+    older_event = {**event, "event_id": "evt-stream-0", "seq": 0}
+    telemetry_result = service.process_message(
+        message("telemetry", older_telemetry, start + timedelta(seconds=2))
+    )
+    status_result = service.process_message(
+        message("status", older_status, start + timedelta(seconds=3))
+    )
+    event_result = service.process_message(
+        message("event", older_event, start + timedelta(seconds=4))
+    )
+
+    assert telemetry_result.disposition == "out_of_order"
+    assert status_result.disposition == "out_of_order"
+    assert event_result.disposition == "out_of_order"
+    assert len(database.telemetry_history("health-node-01")) == 1
+    assert database.get_device("health-node-01")["online"] is True
+    assert service.metrics()["out_of_order"] == 3
+
+
+def test_fault_after_telemetry_insert_rolls_back_and_retry_opens_one_alert(
+    tmp_path, clone_payload, monkeypatch
+):
+    database, service = make_service(tmp_path, hold_seconds=0.0)
+    payload = clone_payload()
+    payload["vitals"]["spo2_pct"] = 88.0
+    original_evaluate = service.rules.evaluate
+
+    def fail_after_insert(*_args, **_kwargs):
+        raise RuntimeError("fault after telemetry insert")
+
+    monkeypatch.setattr(service.rules, "evaluate", fail_after_insert)
+    with pytest.raises(RuntimeError, match="fault after telemetry insert"):
+        service.process_message(message("telemetry", payload))
+
+    assert database.get_device("health-node-01") is None
+    assert database.telemetry_history("health-node-01") == []
+    assert database.list_alerts() == []
+
+    monkeypatch.setattr(service.rules, "evaluate", original_evaluate)
+    restarted = IngestionService(
+        database,
+        RuleEngine(database, DemoRuleSettings(hold_seconds=0.0)),
+    )
+    retry = restarted.process_message(message("telemetry", payload))
+
+    assert retry.disposition == "accepted"
+    assert len(database.telemetry_history("health-node-01")) == 1
+    assert len(database.list_alerts(state="active")) == 1
+    with database.connection() as connection:
+        assert connection.execute("SELECT COUNT(*) FROM alert_history").fetchone()[0] == 1
+
+
+def test_fault_after_alert_write_restores_rule_state_and_notifies_only_after_commit(
+    tmp_path, clone_payload, monkeypatch
+):
+    notifier = RecordingNotifier()
+    database, service = make_service(
+        tmp_path, hold_seconds=0.0, notifier=notifier
+    )
+    payload = clone_payload()
+    payload["vitals"]["spo2_pct"] = 88.0
+    original_open = database.open_or_touch_alert
+
+    def fail_after_alert_write(*args, **kwargs):
+        original_open(*args, **kwargs)
+        raise RuntimeError("fault before outer commit")
+
+    monkeypatch.setattr(database, "open_or_touch_alert", fail_after_alert_write)
+    with pytest.raises(RuntimeError, match="fault before outer commit"):
+        service.process_message(message("telemetry", payload))
+
+    snapshot = service.rules.snapshot_state()
+    assert snapshot.pending_since == {}
+    assert snapshot.last_rule_sample == {}
+    assert snapshot.fall_recovery_since == {}
+    assert snapshot.fall_recovery_last_sample == {}
+    assert database.telemetry_history("health-node-01") == []
+    assert database.list_alerts() == []
+    assert notifier.notifications == []
+
+    monkeypatch.setattr(database, "open_or_touch_alert", original_open)
+    restarted = IngestionService(
+        database,
+        RuleEngine(database, DemoRuleSettings(hold_seconds=0.0)),
+        notifier=notifier,
+    )
+    assert restarted.process_message(message("telemetry", payload)).accepted
+    assert len(notifier.notifications) == 1
+
+
+def test_protocol_metadata_is_counted_without_changing_payload_contract(
+    tmp_path, valid_telemetry_payload
+):
+    _, service = make_service(tmp_path)
+    inbound = message("telemetry", valid_telemetry_payload)
+    inbound = InboundMessage(
+        topic=inbound.topic,
+        payload=inbound.payload,
+        received_at=inbound.received_at,
+        qos=1,
+        retain=True,
+        dup=True,
+    )
+
+    assert service.process_message(inbound).accepted
+    metrics = service.metrics()
+    assert metrics["qos1_messages"] == 1
+    assert metrics["retained_messages"] == 1
+    assert metrics["mqtt_dup_flagged"] == 1
+    assert metrics["payload_bytes"] == len(inbound.payload)

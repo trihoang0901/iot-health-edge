@@ -3,8 +3,204 @@ from __future__ import annotations
 import json
 from datetime import UTC, datetime, timedelta
 
+import pytest
+
 from edge.db import Database
 from edge.schemas import Telemetry, TelemetryV2, TelemetryV3
+
+
+def test_outer_transaction_rolls_back_device_session_and_telemetry(
+    tmp_path, valid_telemetry_payload
+):
+    database = Database(tmp_path / "atomic.db")
+    database.initialize()
+    telemetry = Telemetry.model_validate(valid_telemetry_payload)
+    received = datetime(2026, 8, 4, 12, 0, tzinfo=UTC)
+
+    with pytest.raises(RuntimeError, match="fault before commit"):
+        with database.transaction() as connection:
+            assert database.admit_session(
+                device_id=telemetry.device_id,
+                boot_id=telemetry.boot_id,
+                stream="telemetry",
+                seq=telemetry.seq,
+                received=received,
+                connection=connection,
+            ) == "accepted"
+            database.insert_telemetry(
+                telemetry,
+                received,
+                json.dumps(valid_telemetry_payload),
+                connection=connection,
+            )
+            raise RuntimeError("fault before commit")
+
+    assert database.get_device(telemetry.device_id) is None
+    assert database.telemetry_history(telemetry.device_id) == []
+    with database.connection() as connection:
+        assert connection.execute("SELECT COUNT(*) FROM device_sessions").fetchone()[0] == 0
+
+
+def test_initialize_backfills_current_session_max_sequence_after_legacy_pruning(
+    tmp_path, clone_payload
+):
+    database = Database(tmp_path / "legacy-session.db", telemetry_retention_rows=1)
+    database.initialize()
+    start = datetime(2026, 8, 4, 12, 0, tzinfo=UTC)
+
+    first_payload = clone_payload()
+    first_payload["boot_id"] = "boot-current"
+    first_payload["seq"] = 1
+    latest_payload = clone_payload()
+    latest_payload["boot_id"] = "boot-current"
+    latest_payload["seq"] = 100
+    first = Telemetry.model_validate(first_payload)
+    latest = Telemetry.model_validate(latest_payload)
+    database.insert_telemetry(first, start, json.dumps(first_payload))
+    database.insert_telemetry(
+        latest, start + timedelta(seconds=1), json.dumps(latest_payload)
+    )
+    assert [row["seq"] for row in database.telemetry_history("health-node-01")] == [100]
+
+    # Simulate an upgrade from the pre-session schema after retention already
+    # pruned lower sequence rows.
+    with database.connection() as connection:
+        connection.execute("DROP TABLE device_sessions")
+        connection.commit()
+    database.initialize()
+
+    with database.connection() as connection:
+        session = connection.execute(
+            """
+            SELECT last_telemetry_seq, last_status_seq, last_event_seq
+            FROM device_sessions
+            WHERE device_id = ? AND boot_id = ?
+            """,
+            ("health-node-01", "boot-current"),
+        ).fetchone()
+    assert dict(session) == {
+        "last_telemetry_seq": 100,
+        "last_status_seq": None,
+        "last_event_seq": None,
+    }
+
+    disposition = database.admit_session(
+        device_id="health-node-01",
+        boot_id="boot-current",
+        stream="telemetry",
+        seq=1,
+        received=start + timedelta(seconds=2),
+    )
+    assert disposition == "out_of_order"
+    assert [row["seq"] for row in database.telemetry_history("health-node-01")] == [100]
+
+
+def test_upgrade_backfills_all_boots_and_old_telemetry_replay_cannot_rewind(
+    tmp_path, clone_payload
+):
+    database = Database(tmp_path / "legacy-multi-boot.db")
+    database.initialize()
+    start = datetime(2026, 8, 4, 12, 0, tzinfo=UTC)
+
+    for boot_id, seq, offset in (("boot-a", 80, 0), ("boot-b", 12, 1)):
+        payload = clone_payload()
+        payload["boot_id"] = boot_id
+        payload["seq"] = seq
+        payload["uptime_ms"] = seq * 1000
+        database.insert_telemetry(
+            Telemetry.model_validate(payload),
+            start + timedelta(seconds=offset),
+            json.dumps(payload),
+        )
+
+    # Model a pre-session database whose current device row is boot-b while
+    # telemetry still contains rows from boot-a.
+    with database.connection() as connection:
+        connection.execute("DROP TABLE device_sessions")
+        connection.commit()
+    database.initialize()
+
+    with database.connection() as connection:
+        sessions = connection.execute(
+            """
+            SELECT boot_id, superseded_at, last_telemetry_seq
+            FROM device_sessions
+            WHERE device_id = ? ORDER BY boot_id
+            """,
+            ("health-node-01",),
+        ).fetchall()
+    assert [dict(row) for row in sessions] == [
+        {
+            "boot_id": "boot-a",
+            "superseded_at": "2026-08-04T12:00:01.000Z",
+            "last_telemetry_seq": 80,
+        },
+        {
+            "boot_id": "boot-b",
+            "superseded_at": None,
+            "last_telemetry_seq": 12,
+        },
+    ]
+
+    disposition = database.admit_session(
+        device_id="health-node-01",
+        boot_id="boot-a",
+        stream="telemetry",
+        seq=80,
+        received=start + timedelta(seconds=2),
+    )
+    assert disposition == "stale"
+    assert database.get_device("health-node-01")["boot_id"] == "boot-b"
+
+
+def test_session_backfill_never_lowers_existing_stream_or_connection_watermarks(
+    tmp_path, clone_payload
+):
+    database = Database(tmp_path / "watermark-merge.db")
+    database.initialize()
+    received = datetime(2026, 8, 4, 12, 0, tzinfo=UTC)
+    payload = clone_payload()
+    payload["boot_id"] = "boot-current"
+    payload["seq"] = 10
+    database.insert_telemetry(
+        Telemetry.model_validate(payload), received, json.dumps(payload)
+    )
+    database.initialize()
+
+    with database.connection() as connection:
+        connection.execute(
+            """
+            UPDATE device_sessions
+            SET last_telemetry_seq = 99,
+                last_event_seq = 77,
+                last_status_seq = 88,
+                connection_epoch = 3,
+                expected_lwt_seq = 87
+            WHERE device_id = ? AND boot_id = ?
+            """,
+            ("health-node-01", "boot-current"),
+        )
+        connection.commit()
+
+    database.initialize()
+    with database.connection() as connection:
+        session = connection.execute(
+            """
+            SELECT last_telemetry_seq, last_event_seq, last_status_seq,
+                   connection_epoch, expected_lwt_seq, superseded_at
+            FROM device_sessions
+            WHERE device_id = ? AND boot_id = ?
+            """,
+            ("health-node-01", "boot-current"),
+        ).fetchone()
+    assert dict(session) == {
+        "last_telemetry_seq": 99,
+        "last_event_seq": 77,
+        "last_status_seq": 88,
+        "connection_epoch": 3,
+        "expected_lwt_seq": 87,
+        "superseded_at": None,
+    }
 
 
 def test_telemetry_retention_keeps_newest_rows_per_device(tmp_path, clone_payload):
@@ -29,6 +225,55 @@ def test_telemetry_retention_keeps_newest_rows_per_device(tmp_path, clone_payloa
 
     assert [row["seq"] for row in database.telemetry_history("device-a")] == [2, 3, 4]
     assert [row["seq"] for row in database.telemetry_history("device-b")] == [0, 1]
+
+
+def test_telemetry_history_window_reports_full_coverage_and_metric_validity(
+    tmp_path, valid_telemetry_v3_payload
+):
+    database = Database(tmp_path / "history-window.db")
+    database.initialize()
+    start = datetime(2026, 8, 4, 12, 0, tzinfo=UTC)
+
+    for seq in range(1, 5):
+        payload = json.loads(json.dumps(valid_telemetry_v3_payload))
+        payload["seq"] = seq
+        payload["uptime_ms"] = seq * 1000
+        if seq == 2:
+            payload["vitals"]["heart_rate_bpm"] = None
+            payload["quality"]["heart_rate_valid"] = False
+        if seq == 3:
+            payload["vitals"]["spo2_pct"] = None
+            payload["quality"]["spo2_valid"] = False
+            payload["wearable"]["wrist_surface_temp_c"] = None
+            payload["quality"]["wrist_surface_temp_valid"] = False
+            payload["system"]["faults"] = ["ds18b20_unavailable"]
+        database.insert_telemetry(
+            TelemetryV3.model_validate(payload),
+            start + timedelta(seconds=seq - 1),
+            json.dumps(payload),
+        )
+
+    history, metadata = database.telemetry_history_window(
+        "health-node-01",
+        from_time="2026-08-04T12:00:00.000Z",
+        to_time="2026-08-04T12:00:02.000Z",
+        limit=2,
+    )
+
+    assert [item["seq"] for item in history] == [2, 3]
+    assert metadata == {
+        "coverage_from": "2026-08-04T12:00:00.000Z",
+        "coverage_to": "2026-08-04T12:00:02.000Z",
+        "total_available": 3,
+        "returned": 2,
+        "truncated": True,
+        "downsampling": "none",
+        "validity": {
+            "heart_rate_bpm": {"valid": 2, "total": 3},
+            "spo2_pct": {"valid": 2, "total": 3},
+            "wrist_surface_temp_c": {"valid": 2, "total": 3},
+        },
+    }
 
 
 def test_v1_v2_and_v3_rows_share_database_with_normalized_additive_responses(

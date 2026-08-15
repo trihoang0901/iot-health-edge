@@ -23,6 +23,13 @@ class InboundMessage:
     topic: str
     payload: bytes
     received_at: datetime
+    qos: int | None = None
+    retain: bool | None = None
+    dup: bool | None = None
+
+    @property
+    def payload_size(self) -> int:
+        return len(self.payload)
 
 
 @dataclass(frozen=True, slots=True)
@@ -30,6 +37,7 @@ class IngestResult:
     accepted: bool
     kind: str | None = None
     duplicate: bool = False
+    disposition: str | None = None
     error: str | None = None
 
 
@@ -57,9 +65,16 @@ class IngestionService:
         self._metrics = {
             "accepted": 0,
             "duplicates": 0,
+            "stale": 0,
+            "out_of_order": 0,
             "rejected": 0,
             "queue_dropped": 0,
             "processing_errors": 0,
+            "payload_bytes": 0,
+            "qos0_messages": 0,
+            "qos1_messages": 0,
+            "retained_messages": 0,
+            "mqtt_dup_flagged": 0,
         }
         self._last_error: str | None = None
 
@@ -77,10 +92,26 @@ class IngestionService:
         if self._worker:
             self._worker.join(timeout=timeout)
 
-    def submit(self, topic: str, payload: bytes, received_at: datetime | None = None) -> bool:
+    def submit(
+        self,
+        topic: str,
+        payload: bytes,
+        received_at: datetime | None = None,
+        *,
+        qos: int | None = None,
+        retain: bool | None = None,
+        dup: bool | None = None,
+    ) -> bool:
         try:
             self.queue.put_nowait(
-                InboundMessage(topic=topic, payload=payload, received_at=received_at or utc_now())
+                InboundMessage(
+                    topic=topic,
+                    payload=payload,
+                    received_at=received_at or utc_now(),
+                    qos=qos,
+                    retain=retain,
+                    dup=dup,
+                )
             )
             return True
         except queue.Full:
@@ -90,6 +121,7 @@ class IngestionService:
 
     def process_message(self, message: InboundMessage) -> IngestResult:
         try:
+            self._record_protocol_metadata(message)
             topic_device_id, kind = parse_topic(message.topic)
             if len(message.payload) > self.max_payload_bytes:
                 raise ValueError(
@@ -100,13 +132,36 @@ class IngestionService:
             if kind == "telemetry":
                 telemetry = parse_telemetry(raw_json)
                 self._assert_topic_device(topic_device_id, telemetry.device_id)
-                _, inserted = self.database.insert_telemetry(
-                    telemetry, message.received_at, raw_json
-                )
-                if not inserted:
-                    self._increment("duplicates")
-                    return IngestResult(accepted=True, kind=kind, duplicate=True)
-                changed_alerts = self.rules.evaluate(telemetry, message.received_at)
+                rule_state = self.rules.snapshot_state()
+                changed_alerts: list[dict[str, object]] = []
+                try:
+                    with self.database.transaction() as connection:
+                        disposition = self.database.admit_session(
+                            device_id=telemetry.device_id,
+                            boot_id=telemetry.boot_id,
+                            stream="telemetry",
+                            seq=telemetry.seq,
+                            received=message.received_at,
+                            connection=connection,
+                        )
+                        if disposition != "accepted":
+                            return self._disposition_result(kind, disposition)
+                        _, inserted = self.database.insert_telemetry(
+                            telemetry,
+                            message.received_at,
+                            raw_json,
+                            connection=connection,
+                        )
+                        if not inserted:
+                            return self._disposition_result(kind, "duplicate")
+                        changed_alerts = self.rules.evaluate(
+                            telemetry,
+                            message.received_at,
+                            connection=connection,
+                        )
+                except BaseException:
+                    self.rules.restore_state(rule_state)
+                    raise
                 for alert in changed_alerts:
                     if (
                         alert.get("state") == "open"
@@ -116,23 +171,54 @@ class IngestionService:
             elif kind == "event":
                 event = FallEvent.model_validate_json(raw_json)
                 self._assert_topic_device(topic_device_id, event.device_id)
-                self.database.ensure_device(event.device_id, event.boot_id, message.received_at)
-                alert, inserted = self.database.record_fall_event(
-                    device_id=event.device_id,
-                    event_id=event.event_id,
-                    happened=message.received_at,
-                )
-                if not inserted:
-                    self._increment("duplicates")
-                    return IngestResult(accepted=True, kind=kind, duplicate=True)
+                with self.database.transaction() as connection:
+                    disposition = self.database.admit_session(
+                        device_id=event.device_id,
+                        boot_id=event.boot_id,
+                        stream="event",
+                        seq=event.seq,
+                        received=message.received_at,
+                        connection=connection,
+                    )
+                    if disposition != "accepted":
+                        return self._disposition_result(kind, disposition)
+                    self.database.ensure_device(
+                        event.device_id,
+                        event.boot_id,
+                        message.received_at,
+                        connection=connection,
+                    )
+                    alert, inserted = self.database.record_fall_event(
+                        device_id=event.device_id,
+                        event_id=event.event_id,
+                        happened=message.received_at,
+                        connection=connection,
+                    )
+                    if not inserted:
+                        return self._disposition_result(kind, "duplicate")
                 self._enqueue_alert(alert)
             else:
                 status = DeviceStatus.model_validate_json(raw_json)
                 self._assert_topic_device(topic_device_id, status.device_id)
-                self.database.update_status(status, message.received_at)
+                with self.database.transaction() as connection:
+                    disposition = self.database.admit_session(
+                        device_id=status.device_id,
+                        boot_id=status.boot_id,
+                        stream="status",
+                        seq=status.seq,
+                        received=message.received_at,
+                        online=status.online,
+                        reason=status.reason,
+                        connection=connection,
+                    )
+                    if disposition != "accepted":
+                        return self._disposition_result(kind, disposition)
+                    self.database.update_status(
+                        status, message.received_at, connection=connection
+                    )
 
             self._increment("accepted")
-            return IngestResult(accepted=True, kind=kind)
+            return IngestResult(accepted=True, kind=kind, disposition="accepted")
         except (UnicodeDecodeError, ValueError, ValidationError) as exc:
             self._increment("rejected")
             self._last_error = str(exc)[:500]
@@ -169,6 +255,28 @@ class IngestionService:
     def _increment(self, key: str) -> None:
         with self._metrics_lock:
             self._metrics[key] += 1
+
+    def _record_protocol_metadata(self, message: InboundMessage) -> None:
+        with self._metrics_lock:
+            self._metrics["payload_bytes"] += message.payload_size
+            if message.qos == 0:
+                self._metrics["qos0_messages"] += 1
+            elif message.qos == 1:
+                self._metrics["qos1_messages"] += 1
+            if message.retain:
+                self._metrics["retained_messages"] += 1
+            if message.dup:
+                self._metrics["mqtt_dup_flagged"] += 1
+
+    def _disposition_result(self, kind: str, disposition: str) -> IngestResult:
+        metric = "duplicates" if disposition == "duplicate" else disposition
+        self._increment(metric)
+        return IngestResult(
+            accepted=True,
+            kind=kind,
+            duplicate=disposition == "duplicate",
+            disposition=disposition,
+        )
 
     def _enqueue_alert(self, alert: Mapping[str, object]) -> None:
         if self.notifier is None:
