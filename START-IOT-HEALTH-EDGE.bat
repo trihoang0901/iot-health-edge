@@ -46,7 +46,7 @@ if not exist "%ROOT%firmware\health-node\include\secrets.h" (
 )
 
 set "IOT_HEALTH_ROOT=%ROOT%"
-powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $root=$env:IOT_HEALTH_ROOT; $envFile=Join-Path $root '.env'; $passwords=Join-Path $root 'deploy\mosquitto\generated\passwords'; $acl=Join-Path $root 'deploy\mosquitto\generated\acl'; $secrets=Join-Path $root 'firmware\health-node\include\secrets.h'; foreach($path in @($envFile,$passwords,$acl,$secrets)){if(!(Test-Path -LiteralPath $path) -or (Get-Item -LiteralPath $path).Length -eq 0){exit 10}}; $envText=[IO.File]::ReadAllText($envFile); $edge=[regex]::Match($envText,'(?m)^MQTT_PASSWORD=(.*)$'); if(!$edge.Success -or [string]::IsNullOrWhiteSpace($edge.Groups[1].Value) -or $edge.Groups[1].Value -match 'replace_with_local|placeholder|^\x3C.*\x3E$'){exit 11}; $secretText=[IO.File]::ReadAllText($secrets); $quote=[char]34; $required=@('WIFI_SSID','WIFI_PASSWORD','DEVICE_ID','MQTT_HOST','MQTT_USERNAME','MQTT_PASSWORD'); foreach($name in $required){$pattern='(?m)^\s*#define\s+'+[regex]::Escape($name)+'\s+'+$quote+'[^'+$quote+']+'+$quote; if($secretText -notmatch $pattern){exit 12}}; if($secretText -match 'your-hotspot-name|your-hotspot-password|replace-with-a-local-password|127\.0\.0\.1'){exit 13}; $hostMatch=[regex]::Match($secretText,'(?m)^\s*#define\s+MQTT_HOST\s+'+$quote+'([^'+$quote+']+)'+$quote); [Net.IPAddress]$mqttAddress=$null; if(!$hostMatch.Success -or ![Net.IPAddress]::TryParse($hostMatch.Groups[1].Value,[ref]$mqttAddress) -or $mqttAddress.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork -or [Net.IPAddress]::IsLoopback($mqttAddress)){exit 15}; $localIpv4=@(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction Stop | Where-Object {$_.AddressState -eq 'Preferred' -and $_.IPAddress -ne '0.0.0.0' -and -not [Net.IPAddress]::IsLoopback([Net.IPAddress]::Parse($_.IPAddress))} | ForEach-Object {$_.IPAddress}); if($localIpv4 -notcontains $mqttAddress.IPAddressToString){exit 15}; $aclText=[IO.File]::ReadAllText($acl); if($aclText -match '__DEVICE_ID__|\{device_id\}'){exit 14}; exit 0"
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "$ErrorActionPreference='Stop'; $root=$env:IOT_HEALTH_ROOT; $envFile=Join-Path $root '.env'; $passwords=Join-Path $root 'deploy\mosquitto\generated\passwords'; $acl=Join-Path $root 'deploy\mosquitto\generated\acl'; $secrets=Join-Path $root 'firmware\health-node\include\secrets.h'; foreach($path in @($envFile,$passwords,$acl,$secrets)){if(!(Test-Path -LiteralPath $path) -or (Get-Item -LiteralPath $path).Length -eq 0){exit 10}}; $envText=[IO.File]::ReadAllText($envFile); $placeholder='(?i)replace[-_]?with[-_]?(?:a[-_]?)?local|placeholder|^\s*\x3C.*\x3E\s*$'; $edge=[regex]::Match($envText,'(?m)^MQTT_PASSWORD=([^\r\n]*)$'); if(!$edge.Success -or [string]::IsNullOrWhiteSpace($edge.Groups[1].Value) -or $edge.Groups[1].Value -match $placeholder){exit 11}; $node=[regex]::Match($envText,'(?m)^SIMULATOR_MQTT_PASSWORD=([^\r\n]*)$'); if(!$node.Success -or [string]::IsNullOrWhiteSpace($node.Groups[1].Value) -or $node.Groups[1].Value -match $placeholder){exit 16}; $secretText=[IO.File]::ReadAllText($secrets); $quote=[char]34; $required=@('WIFI_SSID','WIFI_PASSWORD','DEVICE_ID','MQTT_HOST','MQTT_USERNAME','MQTT_PASSWORD'); foreach($name in $required){$pattern='(?m)^\s*#define\s+'+[regex]::Escape($name)+'\s+'+$quote+'[^'+$quote+']+'+$quote; if($secretText -notmatch $pattern){exit 12}}; if($secretText -match 'your-hotspot-name|your-hotspot-password|replace[-_]?with[-_]?(?:a[-_]?)?local|placeholder|127\.0\.0\.1'){exit 13}; $hostMatch=[regex]::Match($secretText,'(?m)^\s*#define\s+MQTT_HOST\s+'+$quote+'([^'+$quote+']+)'+$quote); [Net.IPAddress]$mqttAddress=$null; if(!$hostMatch.Success -or ![Net.IPAddress]::TryParse($hostMatch.Groups[1].Value,[ref]$mqttAddress) -or $mqttAddress.AddressFamily -ne [Net.Sockets.AddressFamily]::InterNetwork -or [Net.IPAddress]::IsLoopback($mqttAddress)){exit 15}; $localIpv4=@(Get-NetIPAddress -AddressFamily IPv4 -ErrorAction Stop | Where-Object {$_.AddressState -eq 'Preferred' -and $_.IPAddress -ne '0.0.0.0' -and -not [Net.IPAddress]::IsLoopback([Net.IPAddress]::Parse($_.IPAddress))} | ForEach-Object {$_.IPAddress}); if($localIpv4 -notcontains $mqttAddress.IPAddressToString){exit 15}; $aclText=[IO.File]::ReadAllText($acl); if($aclText -match '__DEVICE_ID__|\{device_id\}'){exit 14}; exit 0"
 set "CONFIG_RC=%ERRORLEVEL%"
 if not "%CONFIG_RC%"=="0" (
     if "%CONFIG_RC%"=="11" echo [ERROR] MQTT_PASSWORD trong .env chua duoc cau hinh.
@@ -54,8 +54,9 @@ if not "%CONFIG_RC%"=="0" (
     if "%CONFIG_RC%"=="13" echo [ERROR] secrets.h van con gia tri mau. Hay dien Wi-Fi, IP MQTT va mat khau node.
     if "%CONFIG_RC%"=="14" echo [ERROR] ACL Mosquitto van con placeholder device_id.
     if "%CONFIG_RC%"=="15" echo [ERROR] MQTT_HOST trong firmware khong khop bat ky IPv4 cuc bo dang hoat dong. Hay cap nhat IP broker truoc khi nap firmware.
+    if "%CONFIG_RC%"=="16" echo [ERROR] Mat khau MQTT node van la gia tri mau. Chay deploy\scripts\Rotate-LocalNodeMqttCredential.ps1.
     if "%CONFIG_RC%"=="10" echo [ERROR] Mot tep cau hinh bat buoc dang rong.
-    if not "%CONFIG_RC%"=="10" if not "%CONFIG_RC%"=="11" if not "%CONFIG_RC%"=="12" if not "%CONFIG_RC%"=="13" if not "%CONFIG_RC%"=="14" if not "%CONFIG_RC%"=="15" echo [ERROR] Khong kiem tra duoc cau hinh cuc bo.
+    if not "%CONFIG_RC%"=="10" if not "%CONFIG_RC%"=="11" if not "%CONFIG_RC%"=="12" if not "%CONFIG_RC%"=="13" if not "%CONFIG_RC%"=="14" if not "%CONFIG_RC%"=="15" if not "%CONFIG_RC%"=="16" echo [ERROR] Khong kiem tra duoc cau hinh cuc bo.
     set "FINAL_CODE=1"
     goto :finish
 )
@@ -82,13 +83,26 @@ if errorlevel 1 (
 )
 echo [2/7] [OK] Docker Desktop dang san sang.
 
+set "PIO_PYTHON="
 set "PIO_EXE="
 set "PIO_READY=0"
-if exist "%ROOT%.platformio-venv\Scripts\pio.exe" set "PIO_EXE=%ROOT%.platformio-venv\Scripts\pio.exe"
-if not defined PIO_EXE if exist "%ROOT%.venv\Scripts\pio.exe" set "PIO_EXE=%ROOT%.venv\Scripts\pio.exe"
-if not defined PIO_EXE for %%P in (pio.exe platformio.exe) do if not defined PIO_EXE for /f "delims=" %%Q in ('where %%P 2^>nul') do if not defined PIO_EXE set "PIO_EXE=%%Q"
-if defined PIO_EXE "%PIO_EXE%" --version >nul 2>&1
-if defined PIO_EXE if not errorlevel 1 set "PIO_READY=1"
+if exist "%ROOT%.platformio-venv\Scripts\python.exe" (
+    "%ROOT%.platformio-venv\Scripts\python.exe" -m platformio --version >nul 2>&1
+    if not errorlevel 1 (
+        set "PIO_PYTHON=%ROOT%.platformio-venv\Scripts\python.exe"
+        set "PIO_READY=1"
+    )
+)
+if "%PIO_READY%"=="0" if exist "%ROOT%.venv\Scripts\python.exe" (
+    "%ROOT%.venv\Scripts\python.exe" -m platformio --version >nul 2>&1
+    if not errorlevel 1 (
+        set "PIO_PYTHON=%ROOT%.venv\Scripts\python.exe"
+        set "PIO_READY=1"
+    )
+)
+if "%PIO_READY%"=="0" for %%P in (pio.exe platformio.exe) do if not defined PIO_EXE for /f "delims=" %%Q in ('where %%P 2^>nul') do if not defined PIO_EXE set "PIO_EXE=%%Q"
+if "%PIO_READY%"=="0" if defined PIO_EXE "%PIO_EXE%" --version >nul 2>&1
+if "%PIO_READY%"=="0" if defined PIO_EXE if not errorlevel 1 set "PIO_READY=1"
 if "%PIO_READY%"=="1" (
     echo [2/7] [OK] PlatformIO da san sang.
 ) else (
@@ -119,6 +133,36 @@ if errorlevel 1 (
 )
 echo [4/7] [OK] Docker full profile da khoi dong.
 
+echo [4/7] Tai lai password va ACL Mosquitto tu tep cuc bo...
+docker compose --env-file "%ROOT%.env" -f "%ROOT%deploy\docker-compose.yml" restart mosquitto
+if errorlevel 1 (
+    echo [ERROR] Mosquitto khong tai lai duoc password/ACL.
+    set "FINAL_CODE=1"
+    goto :finish
+)
+echo [4/7] [OK] Mosquitto da tai lai password va ACL.
+
+echo [4/7] Cho edge API san sang cho MQTT auth probe, toi da 45 giay...
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "$deadline=(Get-Date).AddSeconds(45); $ready=$false; do{try{$health=Invoke-RestMethod -Uri 'http://127.0.0.1:8000/healthz' -TimeoutSec 3; if($health.database.healthy -eq $true -and $health.mqtt.connected -eq $true -and $health.mqtt.subscribed -eq $true -and $health.ingestion.worker_alive -eq $true){$ready=$true; break}}catch{}; Start-Sleep -Seconds 1}while((Get-Date) -lt $deadline); if($ready){exit 0}; exit 1"
+if errorlevel 1 (
+    echo [ERROR] Edge API chua san sang de kiem tra credential NodeMCU.
+    set "FINAL_CODE=1"
+    goto :finish
+)
+echo [4/7] [OK] Edge API da san sang cho MQTT auth probe.
+
+echo [4/7] Kiem tra credential MQTT cua NodeMCU...
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -File "%ROOT%deploy\scripts\Test-NodeMqttCredential.ps1"
+set "NODE_AUTH_RC=%ERRORLEVEL%"
+if not "%NODE_AUTH_RC%"=="0" (
+    if "%NODE_AUTH_RC%"=="16" echo [ERROR] Credential hoac MQTT_USERNAME/DEVICE_ID trong firmware khong khop password/ACL Mosquitto.
+    if "%NODE_AUTH_RC%"=="16" echo         Chay deploy\scripts\Sync-FirmwareMqttCredential.ps1; neu van loi, kiem tra DEVICE_ID va tao lai ACL.
+    if not "%NODE_AUTH_RC%"=="16" echo [ERROR] Khong kiem tra duoc credential NodeMCU voi Mosquitto.
+    set "FINAL_CODE=1"
+    goto :finish
+)
+echo [4/7] [OK] Mosquitto chap nhan credential MQTT cua firmware.
+
 echo [5/7] Nap firmware neu co NodeMCU...
 if not defined COM_PORT goto :skip_upload
 if not "%PIO_READY%"=="1" (
@@ -135,7 +179,11 @@ if not defined UPLOAD_STARTED_UTC (
     set "FINAL_CODE=1"
     goto :finish
 )
-"%PIO_EXE%" run -d "%ROOT%firmware\health-node" --target upload --upload-port "%COM_PORT%"
+if defined PIO_PYTHON (
+    "%PIO_PYTHON%" -m platformio run -d "%ROOT%firmware\health-node" --target upload --upload-port "%COM_PORT%"
+) else (
+    "%PIO_EXE%" run -d "%ROOT%firmware\health-node" --target upload --upload-port "%COM_PORT%"
+)
 if errorlevel 1 (
     echo [ERROR] Khong nap duoc firmware qua %COM_PORT%.
     echo         Dong Serial Monitor/Arduino IDE neu dang giu cong, kiem tra cap va driver CH340.
@@ -150,15 +198,15 @@ goto :after_upload
 echo [5/7] [SKIP] Khong co NodeMCU, bo qua nap firmware.
 
 :after_upload
-echo [6/7] Cho edge API healthy, toi da 90 giay...
-powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "$deadline=(Get-Date).AddSeconds(90); do{try{$health=Invoke-RestMethod -Uri 'http://127.0.0.1:8000/healthz' -TimeoutSec 3; if($health.status -eq 'ok'){exit 0}}catch{}; Start-Sleep -Seconds 2}while((Get-Date) -lt $deadline); exit 1"
+echo [6/7] Cho edge API, database va MQTT worker san sang, toi da 90 giay...
+powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "$deadline=(Get-Date).AddSeconds(90); do{try{$health=Invoke-RestMethod -Uri 'http://127.0.0.1:8000/healthz' -TimeoutSec 3; if($health.database.healthy -eq $true -and $health.mqtt.connected -eq $true -and $health.mqtt.subscribed -eq $true -and $health.ingestion.worker_alive -eq $true){exit 0}}catch{}; Start-Sleep -Seconds 2}while((Get-Date) -lt $deadline); exit 1"
 if errorlevel 1 (
     echo [ERROR] Edge API khong healthy sau 90 giay.
     docker compose --env-file "%ROOT%.env" -f "%ROOT%deploy\docker-compose.yml" --profile full ps
     set "FINAL_CODE=1"
     goto :finish
 )
-echo [6/7] [OK] Edge API healthy va MQTT worker da khoi dong.
+echo [6/7] [OK] Edge API, database va MQTT worker da san sang.
 if defined COM_PORT (
     echo [6/7] Cho telemetry moi tu NodeMCU, toi da 30 giay...
     powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "$root=$env:IOT_HEALTH_ROOT; $culture=[Globalization.CultureInfo]::InvariantCulture; $styles=[Globalization.DateTimeStyles]([int][Globalization.DateTimeStyles]::AssumeUniversal -bor [int][Globalization.DateTimeStyles]::AdjustToUniversal); $started=[DateTimeOffset]::Parse($env:UPLOAD_STARTED_UTC,$culture,$styles); $text=[IO.File]::ReadAllText((Join-Path $root 'firmware\health-node\include\secrets.h')); $quote=[char]34; $match=[regex]::Match($text,'(?m)^\s*#define\s+DEVICE_ID\s+'+$quote+'([^'+$quote+']+)'+$quote); if(!$match.Success){exit 1}; $base='http://127.0.0.1:8000/api/v1/devices/'+[uri]::EscapeDataString($match.Groups[1].Value); $deadline=(Get-Date).AddSeconds(30); do{try{$device=Invoke-RestMethod -Uri $base -TimeoutSec 3; $latest=Invoke-RestMethod -Uri ($base+'/latest') -TimeoutSec 3; $received=[DateTimeOffset]::Parse($latest.received_at,$culture,$styles); $schema=if($latest.schema){$latest.schema}else{$latest.schema_version}; if($device.online -eq $true -and $received -ge $started -and $schema -eq 'health.telemetry.v4' -and $latest.system.fw -eq '0.4.0'){exit 0}}catch{}; Start-Sleep -Seconds 2}while((Get-Date) -lt $deadline); exit 1"

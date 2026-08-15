@@ -42,6 +42,22 @@ function Invoke-DockerQuiet {
     }
 }
 
+$credentialMutex = New-Object System.Threading.Mutex(
+    $false,
+    'Local\IotHealthEdge.MqttCredentialFiles.v1'
+)
+$credentialMutexAcquired = $false
+try {
+    try {
+        $credentialMutexAcquired = $credentialMutex.WaitOne(0)
+    }
+    catch [System.Threading.AbandonedMutexException] {
+        $credentialMutexAcquired = $true
+    }
+    if (-not $credentialMutexAcquired) {
+        throw 'Mot tien trinh khac dang thay doi credential MQTT.'
+    }
+
 if (-not (Get-Command docker -ErrorAction SilentlyContinue)) {
     throw 'Khong tim thay Docker CLI. Hay khoi dong Docker Desktop roi chay lai.'
 }
@@ -134,4 +150,11 @@ if ($runningServices -contains 'mosquitto') {
 }
 else {
     Write-Host 'Buoc tiep theo: docker compose -f deploy/docker-compose.yml up -d'
+}
+}
+finally {
+    if ($credentialMutexAcquired) {
+        $credentialMutex.ReleaseMutex()
+    }
+    $credentialMutex.Dispose()
 }

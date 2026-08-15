@@ -20,6 +20,29 @@ Không tạo tệp password rỗng thủ công. Nếu chủ động tạo lại 
 - Kiểm tra mật khẩu đúng tài khoản.
 - ACL mẫu chỉ cho node ghi `health-node-01`. `--device-id` khác sẽ bị broker từ chối.
 - Topic phải đúng chính tả và đúng ba hậu tố `telemetry|event|status`.
+- Launcher restart Mosquitto để nạp đúng password/ACL trên đĩa, kiểm tra ba
+  quyền `topic write` exact của `MQTT_USERNAME + DEVICE_ID`, rồi thử MQTT
+  CONNECT bằng credential trong `secrets.h` **trước khi upload**. Probe chỉ
+  truyền credential qua stdin, không publish/subscribe và không in giá trị
+  hoặc raw exception.
+- Nếu mật khẩu node vẫn là giá trị mẫu, xoay tự động bằng RNG cục bộ. Script
+  cập nhật đồng bộ broker hash, `.env` và `secrets.h`, chỉ chuyển mật khẩu mới
+  qua stdin của `mosquitto_passwd`, rồi restart/probe broker mà không in giá trị:
+
+  ```powershell
+  powershell -ExecutionPolicy Bypass -File .\deploy\scripts\Rotate-LocalNodeMqttCredential.ps1
+  ```
+
+- Nếu launcher báo credential firmware không khớp Mosquitto, đồng bộ từ tài
+  khoản node/simulator cục bộ rồi chạy lại launcher để build/upload:
+
+  ```powershell
+  powershell -ExecutionPolicy Bypass -File .\deploy\scripts\Sync-FirmwareMqttCredential.ps1
+  .\START-IOT-HEALTH-EDGE.bat
+  ```
+
+  Script chỉ sửa `MQTT_USERNAME`/`MQTT_PASSWORD` trong `secrets.h`, không in
+  bí mật. Không dùng nó để đổi tài khoản `health_edge`.
 
 ### `Connection refused` hoặc timeout
 
