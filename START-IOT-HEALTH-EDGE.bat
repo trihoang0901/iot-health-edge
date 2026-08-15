@@ -7,7 +7,6 @@ set "ROOT=%~dp0"
 set "FINAL_CODE=0"
 set "NO_PAUSE=0"
 set "PUSHD_OK=0"
-set "NODE_WARN=0"
 set "UPLOAD_STARTED_UTC="
 if /i "%~1"=="--no-pause" set "NO_PAUSE=1"
 
@@ -162,10 +161,12 @@ if errorlevel 1 (
 echo [6/7] [OK] Edge API healthy va MQTT worker da khoi dong.
 if defined COM_PORT (
     echo [6/7] Cho telemetry moi tu NodeMCU, toi da 30 giay...
-    powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "$root=$env:IOT_HEALTH_ROOT; $culture=[Globalization.CultureInfo]::InvariantCulture; $styles=[Globalization.DateTimeStyles]([int][Globalization.DateTimeStyles]::AssumeUniversal -bor [int][Globalization.DateTimeStyles]::AdjustToUniversal); $started=[DateTimeOffset]::Parse($env:UPLOAD_STARTED_UTC,$culture,$styles); $text=[IO.File]::ReadAllText((Join-Path $root 'firmware\health-node\include\secrets.h')); $quote=[char]34; $match=[regex]::Match($text,'(?m)^\s*#define\s+DEVICE_ID\s+'+$quote+'([^'+$quote+']+)'+$quote); if(!$match.Success){exit 1}; $base='http://127.0.0.1:8000/api/v1/devices/'+[uri]::EscapeDataString($match.Groups[1].Value); $deadline=(Get-Date).AddSeconds(30); do{try{$device=Invoke-RestMethod -Uri $base -TimeoutSec 3; $latest=Invoke-RestMethod -Uri ($base+'/latest') -TimeoutSec 3; $received=[DateTimeOffset]::Parse($latest.received_at,$culture,$styles); $schema=if($latest.schema){$latest.schema}else{$latest.schema_version}; if($device.online -eq $true -and $received -ge $started -and $schema -eq 'health.telemetry.v3' -and $latest.system.fw -eq '0.3.1'){exit 0}}catch{}; Start-Sleep -Seconds 2}while((Get-Date) -lt $deadline); exit 1"
+    powershell.exe -NoLogo -NoProfile -ExecutionPolicy Bypass -Command "$root=$env:IOT_HEALTH_ROOT; $culture=[Globalization.CultureInfo]::InvariantCulture; $styles=[Globalization.DateTimeStyles]([int][Globalization.DateTimeStyles]::AssumeUniversal -bor [int][Globalization.DateTimeStyles]::AdjustToUniversal); $started=[DateTimeOffset]::Parse($env:UPLOAD_STARTED_UTC,$culture,$styles); $text=[IO.File]::ReadAllText((Join-Path $root 'firmware\health-node\include\secrets.h')); $quote=[char]34; $match=[regex]::Match($text,'(?m)^\s*#define\s+DEVICE_ID\s+'+$quote+'([^'+$quote+']+)'+$quote); if(!$match.Success){exit 1}; $base='http://127.0.0.1:8000/api/v1/devices/'+[uri]::EscapeDataString($match.Groups[1].Value); $deadline=(Get-Date).AddSeconds(30); do{try{$device=Invoke-RestMethod -Uri $base -TimeoutSec 3; $latest=Invoke-RestMethod -Uri ($base+'/latest') -TimeoutSec 3; $received=[DateTimeOffset]::Parse($latest.received_at,$culture,$styles); $schema=if($latest.schema){$latest.schema}else{$latest.schema_version}; if($device.online -eq $true -and $received -ge $started -and $schema -eq 'health.telemetry.v4' -and $latest.system.fw -eq '0.4.0'){exit 0}}catch{}; Start-Sleep -Seconds 2}while((Get-Date) -lt $deadline); exit 1"
     if errorlevel 1 (
-        echo [6/7] [WARN] Chua nhan telemetry moi. Kiem tra Wi-Fi 2.4 GHz, MQTT_HOST va mat khau health_node.
-        set "NODE_WARN=1"
+        echo [6/7] [ERROR] Chua nhan telemetry v4 moi tu firmware 0.4.0.
+        echo         Kiem tra Wi-Fi 2.4 GHz, MQTT_HOST va mat khau health_node.
+        set "FINAL_CODE=1"
+        goto :finish
     ) else (
         echo [6/7] [OK] NodeMCU da gui telemetry moi toi edge.
     )
@@ -181,11 +182,7 @@ echo Hoan tat. Day la prototype phi lam sang, khong dung cho chan doan hoac cap 
 if "%PUSHD_OK%"=="1" popd >nul 2>&1
 echo.
 if "%FINAL_CODE%"=="0" (
-    if "%NODE_WARN%"=="1" (
-        echo [WARN] Dashboard da chay nhung ket noi NodeMCU chua duoc xac nhan.
-    ) else (
-        echo [OK] Quy trinh ket thuc thanh cong.
-    )
+    echo [OK] Quy trinh ket thuc thanh cong.
 ) else (
     echo [ERROR] Quy trinh dung voi ma loi %FINAL_CODE%.
 )
