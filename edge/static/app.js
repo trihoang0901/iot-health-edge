@@ -18,6 +18,7 @@ const elements = {
   connectionPill: document.querySelector("#connection-pill"),
   connectionText: document.querySelector("#connection-text"),
   lastUpdate: document.querySelector("#last-update"),
+  lastRecovery: document.querySelector("#last-recovery"),
   experimentStatus: document.querySelector("#experiment-status"),
   experimentStatusText: document.querySelector("#experiment-status-text"),
   experimentStatusDetail: document.querySelector("#experiment-status-detail"),
@@ -120,6 +121,14 @@ const runStatusLabels = {
   partial: "Minh chứng chưa đủ",
   failed: "Thất bại",
 };
+
+const recoveryReasonLabels = Object.freeze({
+  recovered_provisioning: "hoàn tất cấu hình mạng mới",
+  recovered_wifi_profile: "chuyển sang hồ sơ Wi‑Fi khả dụng",
+  recovered_broker_ip_change: "phân giải địa chỉ broker mới",
+  recovered_dns_fallback: "dùng địa chỉ dự phòng khi DNS lỗi",
+  recovered_mqtt_transport: "khôi phục kết nối MQTT",
+});
 
 function readUrlState() {
   const params = new URLSearchParams(window.location.search || "");
@@ -343,6 +352,7 @@ function setConnection(device) {
   if (!device) {
     setStateBadge(elements.connectionPill, elements.connectionText, "state-unknown", "Chưa có node");
     elements.lastUpdate.textContent = "Chưa nhận dữ liệu từ thiết bị.";
+    elements.lastRecovery.textContent = "Phục hồi gần nhất: chưa ghi nhận.";
     announceStateTransition("Node", "Chưa có node");
     return;
   }
@@ -355,6 +365,14 @@ function setConnection(device) {
     label,
   );
   elements.lastUpdate.textContent = `${online ? "Cập nhật gần nhất" : "Dữ liệu cuối"}: ${formatTime(device.last_seen_at)}`;
+  if (device.last_recovery_reason && device.last_recovery_at) {
+    const reason = Object.hasOwn(recoveryReasonLabels, device.last_recovery_reason)
+      ? recoveryReasonLabels[device.last_recovery_reason]
+      : "lý do không xác định";
+    elements.lastRecovery.textContent = `Phục hồi gần nhất: ${reason} · ${formatTime(device.last_recovery_at)}`;
+  } else {
+    elements.lastRecovery.textContent = "Phục hồi gần nhất: chưa ghi nhận.";
+  }
   announceStateTransition("Node", label);
 }
 

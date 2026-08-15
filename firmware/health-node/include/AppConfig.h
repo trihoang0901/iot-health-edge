@@ -16,7 +16,7 @@
 
 namespace config {
 
-constexpr char kFirmwareVersion[] = "0.3.1";
+constexpr char kFirmwareVersion[] = "0.4.0";
 
 constexpr uint8_t kI2cSdaPin = D2;       // GPIO4
 constexpr uint8_t kI2cSclPin = D1;       // GPIO5
@@ -33,7 +33,9 @@ constexpr uint32_t kI2cClockStretchLimitUs = 50;
 
 constexpr uint32_t kImuPeriodMs = 20;          // 50 Hz
 constexpr uint32_t kTelemetryPeriodMs = 1000;
-constexpr uint32_t kStatusPeriodMs = 30000;
+// Must stay comfortably below Edge's default 15-second status freshness gate
+// so OpenPortal can wait for a live, non-retained heartbeat deterministically.
+constexpr uint32_t kStatusPeriodMs = 5000;
 constexpr uint32_t kTemperaturePeriodMs = 2000;
 constexpr uint32_t kTemperatureConversionMs = 750;  // DS18B20, 12-bit
 constexpr uint32_t kSensorRetryMs = 10000;
@@ -43,12 +45,19 @@ constexpr uint32_t kPpgMaximumSamplingGapMs = 250;
 
 constexpr uint32_t kReconnectBackoffMinMs = 1000;
 constexpr uint32_t kReconnectBackoffMaxMs = 30000;
-constexpr uint32_t kWifiConnectTimeoutMs = 12000;
+constexpr uint32_t kWifiConnectTimeoutMs = 8000;
+constexpr uint32_t kDnsResolveTimeoutMs = 1500;
 constexpr uint16_t kMqttKeepAliveSeconds = 15;
-constexpr uint16_t kMqttSocketTimeoutSeconds = 1;
-constexpr uint32_t kTcpClientTimeoutMs = 1000;
+constexpr uint16_t kMqttSocketTimeoutSeconds = 2;
+constexpr uint32_t kTcpClientTimeoutMs = 2000;
 constexpr size_t kMqttBufferBytes = 1024;
 constexpr size_t kEventQueueCapacity = 4;
+constexpr uint32_t kAutoProvisioningAfterMs = 45000;
+constexpr uint32_t kProvisioningPortalDurationMs = 300000;
+constexpr uint32_t kCandidateTrialMs = 45000;
+constexpr uint32_t kCommandMaximumFutureMs = 30000;
+constexpr uint32_t kLastGoodStableMs = 60000;
+constexpr uint32_t kLastGoodMinimumWriteIntervalMs = 3600000;
 
 constexpr uint32_t kButtonDebounceMs = 40;
 constexpr uint32_t kBuzzerOnMs = 180;
