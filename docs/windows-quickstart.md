@@ -153,14 +153,19 @@ Ngưỡng demo có khoảng giữ mặc định nên `low_spo2`/`high_hr` cần 
    pio device monitor --baud 115200
    ```
 
-8. Source hiện tại là firmware `0.3.1` và đã được upload trong phiên bring-up
-   2026-08-14. Sau hard reset, Serial boot `a164b119f1fd90b3` báo firmware
-   `0.3.1`, `wifi_connected ip=192.168.137.37` và `mqtt_connected`. API nhận
-   `health.telemetry.v3` tại `seq=23/25/28`, nhiệt độ `27.3125 °C`, motion
-   hợp lệ/`idle` và `sensor_faults=[]`. Máy Windows của phiên thử đã rollback driver CH340 từ
+8. Source hiện tại là firmware `0.4.0` và phát `health.telemetry.v4`. Sau mỗi
+   lần nạp, chỉ coi rollout đạt khi API nhận telemetry mới cùng boot với
+   `system.fw="0.4.0"`, schema v4, `seq` tăng và thiết bị `online=true`. Nếu
+   thấy `0.3.1`/v3 thì NodeMCU vẫn chạy image lịch sử. Source `0.4.0` mới chỉ
+   được build/test tự động trong worktree này; physical run vẫn
+   **`NOT_VERIFIED`**.
+
+   Bằng chứng lịch sử 2026-08-14: Serial boot `a164b119f1fd90b3` báo firmware
+   `0.3.1`, `wifi_connected ip=192.168.137.37` và `mqtt_connected`; API nhận
+   v3 tại `seq=23/25/28`, nhiệt độ `27.3125 °C`, motion hợp lệ/`idle` và
+   `sensor_faults=[]`. Máy Windows của phiên thử đã rollback driver CH340 từ
    `3.9.2024.9` xuống `3.7.2022.1`; không tự áp dụng rollback này trên máy khác
-   nếu COM/upload vẫn hoạt động. Mỗi lần nạp sau vẫn phải xác nhận telemetry mới
-   có `system.fw="0.3.1"`, `seq` tăng và thiết bị `online=true`.
+   nếu COM/upload vẫn hoạt động. Bằng chứng này không xác nhận gate v4.
 9. Với cảm biến chuyển động, I2C scanner phải thấy địa chỉ `0x68`, nhưng ACK
    này chưa phải kết quả đạt. Đọc tiếp `WHO_AM_I` (`0x75`): `0x68` là
    MPU-6050, `0x70` là MPU-6500-compatible. Sau đó xác nhận đọc đủ 14 byte từ
@@ -173,17 +178,21 @@ Ngưỡng demo có khoảng giữ mặc định nên `low_spo2`/`high_hr` cần 
     `OVF_COUNTER`, nhưng vẫn
     fail-closed nếu khoảng lấy mẫu vượt `250 ms` hoặc SparkFun `check()` fetch
     từ bốn mẫu. Chỉ đánh dấu HR/SpO₂ đạt sau khi telemetry cuối có giá trị và cờ
-    hợp lệ đúng; raw quang học riêng lẻ chưa đủ.
+    hợp lệ đúng; raw quang học riêng lẻ chưa đủ. Xem
+    [quy trình chất lượng/hiệu chỉnh PPG](ppg-quality-gate.md): dùng kẹp phẳng,
+    che sáng, lực ép lặp lại, giữ tay/dây cố định và đo ở ngón tay; không suy
+    diễn kết quả ngón tay thành đo cổ tay khi vận động.
 11. DS18B20 phải ở powered three-wire: VDD=3V3, GND chung, DATA=D5/GPIO14 và
-    pull-up ngoài 4,7 kΩ từ DATA lên 3V3. Source `0.3.1` bật thêm pull-up nội yếu
+    pull-up ngoài 4,7 kΩ từ DATA lên 3V3. Source `0.4.0` giữ pull-up nội yếu
     như fallback prototype và yêu cầu chuyển đổi 12-bit bất đồng bộ rồi đọc sau
     ít nhất `750 ms`; không chờ bằng `delay(750)`. Scanner A/B của phiên thử
     không tìm thấy ROM ở `external_only`, nhưng nhánh có fallback pull-up nội
     tìm được family `0x28`, CRC hợp lệ, powered và `27.3125 °C`. Kết quả này
-    không cho phép bỏ điện trở ngoài trên wearable. Khi cảm biến lỗi, v3 vẫn
+    không cho phép bỏ điện trở ngoài trên wearable. Khi cảm biến lỗi, v4 vẫn
     phải phát `wearable.wrist_surface_temp_c=null`,
     `quality.wrist_surface_temp_valid=false`, fault `ds18b20_unavailable` và
-    duy trì MAX30102, dual-MPU cùng MQTT. Sau hard reset, MAX30102 không còn
+    duy trì MAX30102, dual-MPU cùng MQTT. Ở phiên lịch sử `0.3.1` sau hard
+    reset, MAX30102 không còn
     unavailable hoặc `ppg_sample_loss`; chưa đặt ngón tay nên HR/SpO₂ là `null`
     đúng fail-closed và vẫn cần retest ngón tay riêng. Dashboard đã hiển thị
     online, nhiệt độ `27.3 °C` hợp lệ, firmware `0.3.1` và không có lỗi trình

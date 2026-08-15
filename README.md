@@ -31,6 +31,10 @@ các giới hạn kỹ thuật được giữ công khai trong report/evidence.
 
 Evidence kỹ thuật khóa ngày 14/08/2026:
 
+> Khối evidence dưới đây thuộc artifact/commit trước telemetry v4. Nó không xác
+> nhận worktree firmware `0.4.0`; validation hiện tại được ghi riêng trong
+> journal PPG và chưa có physical upload.
+
 - implementation hiện đã được commit tại
   `bba2bc745fbf83bc5ac226e2d5b665594dbe7ba0`; các trạng thái
   `worktree_uncommitted` bên dưới là provenance lịch sử của artifact đã đo trước commit;
@@ -136,6 +140,7 @@ Mở `http://127.0.0.1:8000`. Các kịch bản có sẵn:
 
 ```powershell
 python -m simulator --scenario motion_artifact --count 20
+python -m simulator --scenario unstable_ppg --count 6
 python -m simulator --scenario ds18b20_fault --count 20
 python -m simulator --scenario low_spo2 --count 20
 python -m simulator --scenario high_hr --count 20
@@ -175,22 +180,29 @@ phi lâm sàng, không phải hệ thống cấp cứu.
 Linh kiện cốt lõi người dùng đã có đủ. Breadboard, dây Dupont, cáp USB data và
 nguồn ổn định chỉ là vật tư hỗ trợ lắp thử. DS18B20 dùng chế độ cấp nguồn ba dây:
 VDD lên 3V3, GND chung, DATA tại D5/GPIO14 và điện trở **4,7 kΩ** từ DATA lên
-3V3. Firmware `0.3.1` bật thêm pull-up nội yếu của ESP8266 như một fallback cho
+3V3. Firmware `0.4.0` bật thêm pull-up nội yếu của ESP8266 như một fallback cho
 dây prototype ngắn; fallback này không thay thế điện trở ngoài. Bản wearable ổn
 định vẫn bắt buộc có pull-up 4,7 kΩ đúng tại DATA lên 3V3. Không dùng
 parasite-power trong cấu hình này. Buzzer/nút nhấn là tùy chọn; thao tác ACK
 chính nằm trên dashboard.
 
-Source firmware `0.3.1` phát strict `health.telemetry.v3` với
+Source firmware `0.4.0` phát strict `health.telemetry.v4`: ứng viên
+`heart_rate_raw_bpm`/`spo2_raw_pct` được lưu để audit, còn field HR/SpO₂ cũ chỉ
+chứa giá trị confirmed sau `PpgQualityGate`. Khi `ppg_state` là `warming_up`,
+`unstable`, `motion`, `clipping` hoặc `low_perfusion`, confirmed là `null` và
+dashboard hiện “Đang xác nhận” hoặc lý do tương ứng. Telemetry vẫn có
 `wearable.wrist_surface_temp_c` và `quality.wrist_surface_temp_valid`. Phép
 chuyển đổi DS18B20 12-bit được yêu cầu bất đồng bộ rồi đọc sau ít nhất `750 ms`;
-vòng lặp không chờ bằng `delay()`. Edge tiếp tục xác thực v1/v2 và giữ nguyên
+vòng lặp không chờ bằng `delay()`. Edge tiếp tục xác thực v1/v2/v3 và giữ nguyên
 dữ liệu `skin_temp_*`, môi trường DHT11 cùng raw payload lịch sử trong SQLite;
 không giá trị legacy nào bị đổi nghĩa thành nhiệt độ cổ tay. Firmware nhận
 MPU-6050 có `WHO_AM_I=0x68` hoặc module
 MPU-6500-compatible có `WHO_AM_I=0x70`, cùng ở địa chỉ I2C `0x68`. Mã lỗi công
 khai cũ `mpu6050_unavailable` được giữ lại cho cả hai biến thể để không phá vỡ
-edge/dashboard. Xem chi tiết trong [hợp đồng dữ liệu](docs/data-contract.md).
+edge/dashboard. Xem [hợp đồng dữ liệu](docs/data-contract.md) và
+[quy trình hiệu chỉnh PPG](docs/ppg-quality-gate.md).
+
+### Bằng chứng phần cứng lịch sử — chưa xác nhận firmware 0.4.0
 
 Firmware `0.2.2` đã sửa và được kiểm tra trên phần cứng cho đường khôi phục FIFO
 MAX30102: không dùng giá trị

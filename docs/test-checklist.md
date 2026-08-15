@@ -6,9 +6,10 @@ Ghi ngày giờ, phiên bản firmware/edge, `device_id`, chế độ mạng và
 
 | Bài thử | Lệnh | Kỳ vọng |
 |---|---|---|
-| Contract không cần broker | `python -m simulator --scenario fall --count 8 --dry-run` | JSON hợp lệ; ba topic namespace v1, telemetry strict `health.telemetry.v3`; có đúng một event fall |
+| Contract không cần broker | `python -m simulator --scenario fall --count 8 --dry-run` | JSON hợp lệ; ba topic namespace v1, telemetry strict `health.telemetry.v4`; có đúng một event fall |
 | Bình thường | `python -m simulator --scenario normal --count 20` | Dashboard online, không có alert demo mới |
-| Lỗi DS18B20 | `python -m simulator --scenario ds18b20_fault --count 20` | Telemetry v3 vẫn tới edge; `wearable.wrist_surface_temp_c=null`, cờ false, có `ds18b20_unavailable`; không tạo alert |
+| Lỗi DS18B20 | `python -m simulator --scenario ds18b20_fault --count 20` | Telemetry v4 vẫn tới edge; `wearable.wrist_surface_temp_c=null`, cờ false, có `ds18b20_unavailable`; không tạo alert |
+| PPG chưa ổn định | `python -m simulator --scenario unstable_ppg --count 6` | raw HR luân phiên 180/66; confirmed HR/SpO₂ là null; dashboard hiện “Đang xác nhận”; không tạo alert |
 | Nhiễu chuyển động | `python -m simulator --scenario motion_artifact --count 20` | HR/SpO₂ là null, cờ invalid; không sinh alert sinh hiệu |
 | SpO₂ thấp demo | `python -m simulator --scenario low_spo2 --count 20` | Alert demo sau hold time, không xuất hiện nếu cờ invalid |
 | HR cao demo | `python -m simulator --scenario high_hr --count 20` | Alert demo sau hold time |
@@ -27,7 +28,8 @@ Sau mỗi alert, ACK trên dashboard và xác nhận actor/note/thời điểm �
       và nằm trong `0..50 °C`.
 - [ ] Motion invalid nhưng còn accel/gyro bị từ chối.
 - [ ] Telemetry v1/v2 hợp lệ vẫn được nhận; mỗi phiên bản từ chối field ngoài
-      schema và v3 không chấp nhận `skin_temp_*` hay `environment`.
+      schema; v3 không chấp nhận `skin_temp_*`/`environment`; v4 bắt đúng cặp
+      raw/confirmed và `ppg_state`.
 - [ ] Migration database cũ giữ nguyên bản ghi/cột `skin_temp_*`, đồng thời
       giữ cột environment v2, raw payload và thêm nullable/defaulted wrist
       columns mà không yêu cầu xóa SQLite.
@@ -53,6 +55,24 @@ Sau mỗi alert, ACK trên dashboard và xác nhận actor/note/thời điểm �
       IPv4 non-loopback đang hoạt động và không in credential.
 
 ## D. Phần cứng theo từng tầng
+
+### D1. Current acceptance `0.4.0` / telemetry v4
+
+- [ ] Fresh boot báo `system.fw="0.4.0"`, API nhận schema v4, `seq` tăng và
+      launcher không được exit 0 nếu post-upload gate này thất bại.
+- [ ] Ngón tay được kẹp/che sáng ổn định: `warming_up` chuyển thành `valid` chỉ
+      sau ít nhất ba cửa sổ nhất quán; raw và confirmed được phân biệt rõ.
+- [ ] Chuỗi raw 180/66 hoặc jump trên 25 bpm làm confirmed `null` và reason
+      `unstable` cho tới khi ba cửa sổ xác nhận mức mới.
+- [ ] No-finger, motion, clipping, low-perfusion và sample-loss đều fail-closed;
+      raw cũng phải null ở no-finger/sample-loss.
+- [ ] Thu capture finger-present thực tế và đối chiếu tham chiếu trước khi gọi
+      HR/SpO₂ v4 là đạt. Hiện physical gate v4 là **`NOT_VERIFIED`**.
+
+### D2. Log chi tiết và bằng chứng lịch sử
+
+Các dấu `[x]` bên dưới thuộc các lần bring-up `0.2.2`/`0.3.1`; chúng không tự
+đánh dấu D1 đạt cho `0.4.0`. Các mục `[ ]` vẫn là việc phần cứng cần làm.
 
 - [ ] I2C scanner thấy MAX30102 `0x57` và cảm biến MPU tại `0x68`; AD0 ở mức
       thấp. ACK địa chỉ chưa đủ để đánh dấu cảm biến đạt.

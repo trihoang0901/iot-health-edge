@@ -28,14 +28,14 @@ The ESP8266 GPIO pins are not 5 V tolerant.
 A DS18B20 DATA line needs a **4.7 kOhm pull-up to 3.3 V**. Connect VDD to 3.3 V,
 GND to the common ground, and DATA to D5/GPIO14. Parasite-power mode is rejected
 because the asynchronous conversion path does not provide a strong pull-up.
-Firmware `0.3.1` also enables the ESP8266's weak internal pull-up as a fallback
+Firmware `0.4.0` also enables the ESP8266's weak internal pull-up as a fallback
 for short prototype wiring. That fallback is not a substitute for the external
 4.7 kOhm resistor; a stable wearable build still requires the external
 DATA-to-3.3 V pull-up.
 The probe reports local wrist-surface contact temperature only; it does not
 measure core body temperature and is not a clinical thermometer.
 
-Firmware `0.3.1` probes the motion sensor at I2C address `0x68` and then reads
+Firmware `0.4.0` probes the motion sensor at I2C address `0x68` and then reads
 register `WHO_AM_I` (`0x75`). It accepts only `0x68` for MPU-6050 or `0x70` for
 an MPU-6500-compatible device. The I2C address and identity value are different
 checks: an address scan alone is not proof that the supported sensor is ready.
@@ -91,10 +91,18 @@ iot-health/v1/devices/{device_id}/event
 iot-health/v1/devices/{device_id}/status
 ```
 
-Telemetry uses schema `health.telemetry.v3`. `vitals` contains HR and SpO2;
-`wearable.wrist_surface_temp_c` contains the DS18B20 contact reading and is
-paired with `quality.wrist_surface_temp_valid`. Measurements are JSON `null`
-when invalid; JSON `NaN` is never emitted. `motion.accel_g` and
+Telemetry uses schema `health.telemetry.v4`. `vitals.heart_rate_raw_bpm` and
+`vitals.spo2_raw_pct` expose plausible algorithm candidates for audit, while
+the existing `heart_rate_bpm` and `spo2_pct` fields contain only values accepted
+by `PpgQualityGate`. `quality.ppg_state` reports `valid`, `no_finger`,
+`warming_up`, `motion`, `clipping`, `low_perfusion`, `unstable`, or
+`sample_loss`. The gate checks optical clipping and relative pulsatility,
+validates beat intervals with median/MAD, applies a five-result Hampel/median
+filter, and requires three consistent windows. A change larger than 25 bpm is
+published with confirmed HR/SpO2 as `null` until three windows confirm the new
+level. `wearable.wrist_surface_temp_c` contains the DS18B20 contact reading and
+is paired with `quality.wrist_surface_temp_valid`. Confirmed measurements are
+JSON `null` when invalid; JSON `NaN` is never emitted. `motion.accel_g` and
 `motion.gyro_dps` are vector magnitudes. `quality.ppg` is a bounded 0..1
 signal-quality heuristic, not a clinical confidence score.
 
@@ -113,7 +121,7 @@ flood the broker with stale readings.
 ## Bounded sampling behavior
 
 - The supported MPU-6050/MPU-6500-compatible motion sensor is sampled at 50 Hz.
-- MAX30102 is drained every loop. Firmware `0.3.1` retains the `0.2.2` recovery
+- MAX30102 is drained every loop. Firmware `0.4.0` retains the `0.2.2` recovery
   behavior and does not reject a read from
   a pre-read `OVF_COUNTER`: after a startup overflow, a saturated counter can
   require a complete sample to be consumed before it clears, so using it as a
@@ -162,6 +170,8 @@ a bring-up value. The firmware suppresses HR/SpO2 during motion artifact,
 insufficient samples, unavailable motion-sensor quality data, implausible algorithm
 output, or finger removal. It does not repeat a stale value as current.
 
+### Historical physical evidence — does not validate firmware 0.4.0
+
 The recovery diagnostic proved the raw optical path: bypassing the pre-read
 overflow gate yielded about 25 samples/s, maximum observed loop gaps of 10-37
 ms, and zero local-storage overflow hits. No-finger IR was about 812-853; an
@@ -196,7 +206,10 @@ accuracy, or medical accuracy.
    fault and nullable values, including `ds18b20_unavailable` for DS18B20.
 3. Verify MAX30102 raw red/IR changes clearly between no-finger and a stable,
    correctly positioned finger. Raw optical response alone is not an HR/SpO2
-   pass.
+   pass. Production firmware intentionally does not publish raw optical samples;
+   use a separate credential-free diagnostic capture and follow
+   [`docs/ppg-quality-gate.md`](../../docs/ppg-quality-gate.md). No such 0.4.0
+   physical capture has been verified yet.
 4. Remove a finger from MAX30102; HR and SpO2 must become `null`.
 5. Move the board while collecting PPG; `motion_artifact` should suppress the
    derived values.

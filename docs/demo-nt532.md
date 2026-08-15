@@ -61,7 +61,9 @@ upload firmware:
 .\scripts\VERIFY-MVP.ps1 -IncludeDockerLive -IncludeFirmware
 ```
 
-Source regression suite cuối đạt `258 passed`. Final verification artifact `1.3`,
+Khối artifact dưới đây là evidence lịch sử trước telemetry v4. Source regression
+suite của artifact đó đạt `258 passed`; nó không xác nhận worktree `0.4.0`.
+Final verification artifact `1.3`,
 browser artifact `1.1` và evidence bundle v5 đã được khóa bằng SHA-256 trong biên
 bản ở Mục 5; không tái dùng hash hoặc run v1-v4.
 
@@ -86,13 +88,13 @@ python -m simulator --device-id health-node-01 --scenario normal --count 20 --se
 
 Quan sát bắt buộc:
 
-- node online, schema `health.telemetry.v3` và sequence tăng;
+- node online, schema `health.telemetry.v4` và sequence tăng;
 - ba topic vẫn thuộc namespace `iot-health/v1/devices/{device_id}/...`;
 - dữ liệu hợp lệ được lưu/hiển thị và không có alert demo mới;
 - trạng thái Edge và trạng thái node không bị gộp thành một nhãn.
 
 Evidence cần chụp: command exit code, API/dashboard với device ID, schema, boot,
-seq và timestamp. Không dùng ảnh dashboard DHT11 cũ làm bằng chứng cho source v3.
+seq và timestamp. Không dùng ảnh dashboard DHT11 cũ làm bằng chứng cho source v4.
 
 ### Bước 2 - Motion artifact: chứng minh fail-closed
 
@@ -106,6 +108,16 @@ Quan sát bắt buộc:
 - HR/SpO2 là `null` với validity flag tương ứng bằng `false`;
 - UI phân biệt trạng thái `noisy` với `fault` và giải thích lý do dữ liệu bị loại;
 - không mở alert sinh hiệu từ các candidate invalid.
+
+### Bước 2b - PPG chưa ổn định: raw không được giả làm confirmed
+
+```powershell
+python -m simulator --device-id health-node-01 --scenario unstable_ppg --count 6 --seed 106
+```
+
+Raw HR phải luân phiên 180/66 trong API audit; `heart_rate_bpm` và `spo2_pct`
+confirmed phải là `null`, reason là `unstable`, dashboard hiện “Đang xác nhận”
+và không mở alert sinh hiệu.
 
 ### Bước 3 - Low SpO2 demo: alert hợp lệ và ACK
 
@@ -244,17 +256,18 @@ Kết thúc bằng ba câu rõ ràng:
 |---|---|---|
 | Provenance RQ1 | `VERIFIED_WITH_LIMITATION` | baseline commit `7030e4b30300dec65646e3091356ca00d9eaa8f5`, clean hash `760429f9dceed614279cb6c937d111a66fb1cb63ca813ed615c7de1bbd24c280`; artifact hardened sinh pre-commit với scoped hash `4bce098e63c53ab20bc7d9ab37162848504160b620c4a1a7ebba6ccfe7de5419`; source hiện ở `935c393e03a68465e538f624ff3405cd4560eb49` |
 | Provenance RQ2 v5 | `VERIFIED_WITH_LIMITATION` | artifact sinh với `worktree_uncommitted`; allowlisted source hash `f5e27d518f9a625397f289f90fd42bac9cf89d628c8e820a18ce55dfdacde280` khớp commit `935c393e03a68465e538f624ff3405cd4560eb49` |
-| Source regression | `VERIFIED` | `258 passed` |
+| Source regression lịch sử | `VERIFIED_WITH_LIMITATION` | `258 passed` thuộc artifact/commit trước v4; worktree v4 được kiểm thử riêng, không thay đổi artifact đã ký |
 | Normal campaign | `VERIFIED` | artifact `5.0`, 30 matched seed/profile, 30 message/run; `evidence/analysis/rq2-v5-experiments.json`, SHA-256 `b2bb2e80edee83bd8a89531d079e4148ddb1442e7a9734cb2de353e4cddd4ffb` |
-| Normal simulator E2E | `VERIFIED` | acceptance 14/08/2026: schema v3, seq 20, quality hợp lệ, không có alert mới; exact command/seed và boot ID ở `plans/reports/260814-073149-software-e2e-acceptance/scenario-acceptance.json` |
-| Motion artifact tương tác | `VERIFIED` | HR/SpO2 null + invalid, fault `ppg_motion_artifact`, không có alert mới; snapshot API ở `scenario-observations.json` cùng thư mục |
-| Low SpO2 + ACK tương tác | `VERIFIED` | SpO2 hợp lệ 88,5%, đúng một alert `demo_low_spo2`; ACK lặp giữ `acknowledged`; cùng biên bản acceptance |
+| Historical normal simulator E2E v3 | `VERIFIED_WITH_LIMITATION` | acceptance 14/08/2026: simulator 1.2.0/schema v3, seq 20; không phải bằng chứng v4 |
+| Historical motion artifact v3 | `VERIFIED_WITH_LIMITATION` | HR/SpO2 null + invalid, không alert; snapshot cũ không xác nhận gate firmware v4 |
+| Historical low SpO2 + ACK v3 | `VERIFIED_WITH_LIMITATION` | SpO2 88,5%, một alert + ACK; chỉ là contract/rule lịch sử |
+| Current simulator/API/dashboard v4 | `NOT_VERIFIED` | cần tạo artifact E2E mới từ simulator 1.3.0, gồm `unstable_ppg`; unit/integration tests không thay thế artifact đo |
 | Fault probe A/B | `VERIFIED_WITH_LIMITATION` | atomic alert: baseline 0/30, hardened 30/30; old LWT: baseline 0/30, hardened 30/30; deterministic repeatability, không có inferential CI |
 | `lan-baseline` | `VERIFIED` | scheduled observation 1,0 [1,0; 1,0]; schedule→API p50 235,0 ms [234,0; 254,087]; p95 305,525 ms [289,8; 348,4]; attempted delivery phụ 1,0 |
 | `remote-app-emulated` | `VERIFIED_WITH_BOUNDARY` | scheduled observation 0,833333 [0,8; 0,866667]; p50 632,75 ms [539,0; 710,75]; p95 969,925 ms [885,575; 1.101,75]; intentional drop 0,166667 [0,133333; 0,2]; attempted delivery phụ 1,0 |
 | Paired remote − LAN | `VERIFIED_WITH_BOUNDARY` | coverage -0,166667 [-0,2; -0,133333]; p50 +363,0 ms [+316,5; +472,25]; p95 +634,275 ms [+564,875; +760,025]; attempted delta 0 |
 | Measurement boundary | `VERIFIED` | same-process host monotonic, polling 100 ms, primary schedule-to-API, app impairment before publish, `network_claim=none`, `measured_5g=false` |
-| Final verification | `VERIFIED` | artifact `1.3`, `commit_clean` tại `ee0c2331e3aebdf8d08f6200c4f2b351d6f0893b`; 258 test + JS + Compose + dry-run + Docker live + firmware build-only; SHA-256 `826a42b26a8d407f13fc6f691cc7305d1d96c305cf9b5c5354e3d63c252d28e8` |
+| Final verification lịch sử | `VERIFIED_WITH_LIMITATION` | artifact `1.3` tại commit lịch sử; không bao phủ worktree telemetry v4/firmware 0.4.0 |
 | Browser smoke | `VERIFIED_WITH_LIMITATION` | artifact `1.1`, 320/360/768/1440 px; SHA-256 `e03c63d8849751fd57742839c0da802499f5eb757abaf55140b174012c210a02`; không phải WCAG conformance |
 | Manual screen reader/zoom 400% | `NOT_VERIFIED` | cần kiểm tra thủ công riêng |
 | Research bundle secret scan | `VERIFIED` | 189 file allowlist; aggregate reconcile + 185 text file redaction pass; ZIP SHA-256 `52aa1960e98209560a61fe9c835a98d47e46f95a5e8780bc365a6a993e083daa` |

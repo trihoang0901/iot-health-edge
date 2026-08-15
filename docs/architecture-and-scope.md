@@ -70,9 +70,10 @@ Một số đo không hợp lệ phải là `null` và cờ `*_valid` tương �
 sát máy trạng thái. Event vẫn chỉ là tín hiệu demo cần người kiểm tra, không
 phải kết luận có người đã ngã.
 
-Source firmware `0.3.1` phát `health.telemetry.v3`. Edge phân luồng nghiêm ngặt
-theo trường `schema`, đồng thời tiếp tục nhận `health.telemetry.v1` và v2.
-Migration SQLite chỉ thêm cột nhiệt độ cổ tay/cờ hợp lệ dạng nullable/defaulted;
+Source firmware `0.4.0` phát `health.telemetry.v4`, tách raw candidate khỏi
+confirmed HR/SpO₂ và công bố `quality.ppg_state`. Edge phân luồng nghiêm ngặt
+theo trường `schema`, đồng thời tiếp tục nhận `health.telemetry.v1`, v2 và v3.
+Migration SQLite chỉ thêm các cột mới dạng nullable/defaulted;
 các cột, bản ghi và raw payload `skin_temp_*` v1 cùng environment DHT11 v2 được
 giữ nguyên, không bị xóa hoặc diễn giải lại thành nhiệt độ cổ tay.
 

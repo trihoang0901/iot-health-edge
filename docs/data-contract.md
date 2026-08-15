@@ -11,12 +11,61 @@
 | Trạng thái | `iot-health/v1/devices/{device_id}/status` |
 
 `v1` trong đường dẫn là phiên bản namespace topic và vẫn được giữ khi
-telemetry nâng lên v2/v3. `device_id` trong payload phải khớp segment thiết bị
+telemetry nâng lên v2/v3/v4. `device_id` trong payload phải khớp segment thiết bị
 trong topic. JSON không được chứa `NaN`/`Infinity` hoặc field ngoài schema.
 
-## Telemetry hiện hành `health.telemetry.v3`
+## Telemetry hiện hành `health.telemetry.v4`
 
-Source firmware `0.3.1` và simulator hiện hành phát cấu trúc sau:
+Firmware `0.4.0` và simulator `1.3.0` tách ứng viên PPG thô khỏi giá trị đã
+được xác nhận:
+
+```json
+{
+  "schema": "health.telemetry.v4",
+  "device_id": "health-node-01",
+  "boot_id": "73f77b235fc24b29a6f8268b396ca69e",
+  "seq": 42,
+  "uptime_ms": 42100,
+  "vitals": {
+    "heart_rate_raw_bpm": 180.0,
+    "heart_rate_bpm": null,
+    "spo2_raw_pct": 97.0,
+    "spo2_pct": null
+  },
+  "wearable": { "wrist_surface_temp_c": 33.2 },
+  "motion": { "accel_g": 1.012, "gyro_dps": 2.1, "fall_state": "idle" },
+  "quality": {
+    "ppg": 0.58,
+    "ppg_state": "unstable",
+    "finger_present": true,
+    "motion_artifact": false,
+    "heart_rate_valid": false,
+    "spo2_valid": false,
+    "wrist_surface_temp_valid": true,
+    "motion_valid": true
+  },
+  "system": { "rssi_dbm": -55, "free_heap": 36120, "fw": "0.4.0", "faults": [] }
+}
+```
+
+- `*_raw_*` là ứng viên của thuật toán MAXIM, chỉ để audit/tinh chỉnh; nó chưa
+  phải kết quả được chấp nhận và không được dùng cho alert hoặc thẻ số chính.
+- `heart_rate_bpm` và `spo2_pct` là giá trị confirmed. Khi chưa đủ tin cậy,
+  chúng bắt buộc là `null` và cờ `*_valid=false`; edge không giữ lại giá trị cũ.
+- `quality.ppg_state` nhận một trong: `valid`, `no_finger`, `warming_up`,
+  `motion`, `clipping`, `low_perfusion`, `unstable`, `sample_loss`.
+- Chỉ trạng thái `valid` mới được đi kèm giá trị HR/SpO2 confirmed. Với
+  `no_finger` hoặc `sample_loss`, cả raw lẫn confirmed phải là `null`.
+- API chuẩn hóa tiếp tục trả `vitals.*` để tương thích, đồng thời thêm
+  `measurements.heart_rate` và `measurements.spo2` gồm `raw_value`,
+  `confirmed_value`, `valid`, `state`, `reason` và `unit`.
+- Rule engine chỉ đọc confirmed + validity. Mẫu invalid không được mở hoặc đóng
+  alert; việc đóng alert sinh hiệu cần một khoảng recovery liên tục.
+
+## Telemetry lịch sử `health.telemetry.v3`
+
+Firmware `0.3.1` và simulator `1.2.0` đã phát cấu trúc sau; edge vẫn nhận để
+tương thích dữ liệu/node cũ:
 
 ```json
 {
@@ -107,9 +156,9 @@ Bring-up phần cứng 2026-08-14 đã nhận v3 sau hard reset từ boot
 contract. Đây là bằng chứng contract/pipeline, không phải hiệu chuẩn cảm biến
 hoặc xác nhận độ chính xác y tế.
 
-## Tương thích telemetry v1/v2 và dữ liệu lịch sử
+## Tương thích telemetry v1/v2/v3 và dữ liệu lịch sử
 
-Edge xác thực nghiêm ngặt cả ba discriminator:
+Edge xác thực nghiêm ngặt cả bốn discriminator:
 
 - `health.telemetry.v1` giữ `vitals.skin_temp_c` và
   `quality.skin_temp_valid` cho node/lịch sử cũ.
@@ -117,11 +166,14 @@ Edge xác thực nghiêm ngặt cả ba discriminator:
   cờ hợp lệ DHT11 cho node/lịch sử v2.
 - `health.telemetry.v3` chỉ dùng object `wearable` và cờ nhiệt độ cổ tay mới;
   v3 không chấp nhận field nhiệt độ v1/v2.
+- `health.telemetry.v4` giữ `wearable` của v3 và thêm cặp raw/confirmed cùng
+  `quality.ppg_state`; v1-v3 không bị suy diễn là đã đi qua gate firmware mới.
 
 Migration SQLite là không phá hủy: hệ thống thêm `schema_version`,
 `ambient_temp_c`, `humidity_pct`, các cờ v2, rồi thêm nullable
 `wrist_surface_temp_c` và cờ `wrist_surface_temp_valid` mặc định false. Không
-xóa cột/bản ghi/raw payload `skin_temp_*` hoặc environment. API trả cấu trúc
+xóa cột/bản ghi/raw payload cũ; migration v4 chỉ thêm nullable
+`heart_rate_raw_bpm`, `spo2_raw_pct` và `ppg_state`. API trả cấu trúc
 chuẩn hóa dạng superset: field không thuộc schema gốc là `null` với cờ `false`;
 v1/v2 không bao giờ được suy diễn thành nhiệt độ cổ tay. Alert
 `surface_temp_demo` lịch sử đã được retired/resolved và không được thay bằng
@@ -160,7 +212,7 @@ trạng thái. Đây chỉ là nghi ngờ ngã trong demo, luôn cần người 
   "system": {
     "rssi_dbm": -55,
     "free_heap": 35980,
-    "fw": "0.3.1",
+    "fw": "0.4.0",
     "faults": []
   }
 }
