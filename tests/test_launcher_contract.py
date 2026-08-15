@@ -105,6 +105,17 @@ catch {
     assert completed.stderr == ""
 
 
+def test_compose_base_arguments_keep_compose_before_global_compose_options():
+    source = LAUNCHER.read_text(encoding="utf-8")
+    compose_helper = _function_source(
+        source, "Get-ComposeBaseArguments", "Assert-DockerReady"
+    )
+
+    assert "$arguments = @('compose')" in compose_helper
+    assert compose_helper.index("@('compose')") < compose_helper.index("'--env-file'")
+    assert compose_helper.index("@('compose')") < compose_helper.index("'-f'")
+
+
 def test_launcher_uses_local_python_module_instead_of_copied_pio_executable():
     source = LAUNCHER.read_text(encoding="utf-8")
 

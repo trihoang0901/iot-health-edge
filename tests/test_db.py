@@ -494,6 +494,11 @@ def test_initialize_adds_current_columns_to_legacy_telemetry_without_data_loss(
     assert migrated["measurements"]["heart_rate"]["confirmed_value"] == 76.0
     assert migrated["measurements"]["spo2"]["raw_value"] == 97.0
 
+    with database.connection() as connection:
+        changes_before = connection.total_changes
+        Database._migrate_telemetry_columns(connection)
+        assert connection.total_changes == changes_before
+
 
 def test_initialize_resolves_active_alert_for_retired_surface_rule(tmp_path):
     database = Database(tmp_path / "retired-rule.db")

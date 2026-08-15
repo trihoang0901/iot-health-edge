@@ -1,0 +1,1 @@
+{"timestamp":"2026-08-15T17:04:51.2436446Z","device_id":"health-node-01","boot_id":"a160de15efed1970","seq":614,"uptime_ms":648756,"free_heap":40752,"rssi_dbm":-35,"faults":["ppg_sample_loss"],"online":true,"status_reason":"heartbeat","fw":"0.4.0","schema":"health.telemetry.v4"}

@@ -86,7 +86,7 @@ function Get-ComposeBaseArguments {
     if ($RequireEnv -and -not (Test-Path -LiteralPath $script:EnvFile)) {
         throw 'Thieu .env. Chay INSTALL-IOT-HEALTH-EDGE.bat va dien cau hinh truoc.'
     }
-    $arguments = @()
+    $arguments = @('compose')
     if ($UseEmptyEnv) {
         # An explicit empty Windows device prevents Compose from auto-loading .env.
         $arguments += @('--env-file', 'NUL')

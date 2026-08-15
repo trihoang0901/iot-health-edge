@@ -266,6 +266,11 @@ class Database:
                 'health.telemetry.v2',
                 'health.telemetry.v3'
             )
+              AND (
+                  heart_rate_raw_bpm IS NOT heart_rate_bpm
+                  OR spo2_raw_pct IS NOT spo2_pct
+                  OR ppg_state IS NOT 'legacy'
+              )
             """
         )
 
