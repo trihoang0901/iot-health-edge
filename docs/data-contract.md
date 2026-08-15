@@ -9,6 +9,7 @@
 | Telemetry | `iot-health/v1/devices/{device_id}/telemetry` |
 | Sự kiện | `iot-health/v1/devices/{device_id}/event` |
 | Trạng thái | `iot-health/v1/devices/{device_id}/status` |
+| Lệnh theo boot | `iot-health/v1/devices/{device_id}/command/{boot_id}` |
 
 `v1` trong đường dẫn là phiên bản namespace topic và vẫn được giữ khi
 telemetry nâng lên v2/v3. `device_id` trong payload phải khớp segment thiết bị
@@ -16,7 +17,7 @@ trong topic. JSON không được chứa `NaN`/`Infinity` hoặc field ngoài sc
 
 ## Telemetry hiện hành `health.telemetry.v3`
 
-Source firmware `0.3.1` và simulator hiện hành phát cấu trúc sau:
+Source firmware `0.4.0` và simulator hiện hành phát cấu trúc sau:
 
 ```json
 {
@@ -49,7 +50,7 @@ Source firmware `0.3.1` và simulator hiện hành phát cấu trúc sau:
   "system": {
     "rssi_dbm": -55,
     "free_heap": 36120,
-    "fw": "0.3.1",
+    "fw": "0.4.0",
     "faults": []
   }
 }
@@ -79,13 +80,13 @@ Quy tắc chung:
 - Khi `motion_artifact=true`, HR và SpO₂ phải không hợp lệ. Nếu
   `motion_valid=false`, `accel_g`/`gyro_dps` là `null` và
   `fall_state="unknown"`.
-- Source firmware `0.3.1` tiếp tục hỗ trợ MPU-6050 (`WHO_AM_I=0x68`) và module
+- Source firmware `0.4.0` tiếp tục hỗ trợ MPU-6050 (`WHO_AM_I=0x68`) và module
   MPU-6500-compatible (`WHO_AM_I=0x70`) tại cùng địa chỉ I2C `0x68`. Danh tính
   IMU không được thêm vào payload; cả hai biến thể dùng cùng field motion và
   tiếp tục báo mã tương thích ngược `mpu6050_unavailable` khi lỗi.
 - HR hoặc SpO₂ hợp lệ còn yêu cầu `quality.ppg` khác `null`, có ngón tay và
   `motion_valid=true`.
-- Source firmware `0.3.1` giữ sửa lỗi đã được kiểm tra ở `0.2.2`: không dùng
+- Source firmware `0.4.0` giữ sửa lỗi đã được kiểm tra ở `0.2.2`: không dùng
   pre-read `OVF_COUNTER` của MAX30102 làm gate.
   Cửa sổ PPG vẫn bị xóa, HR/SpO₂ thành `null` và cờ hợp lệ thành `false` nếu
   khoảng lấy mẫu vượt `250 ms` hoặc SparkFun `check()` fetch từ bốn mẫu vào
@@ -94,7 +95,7 @@ Quy tắc chung:
   `ds18b20_unavailable`, firmware có thể báo `mpu6050_unavailable`,
   `ppg_sample_loss` hoặc `event_queue_overflow`.
 
-Firmware `0.3.1` yêu cầu chuyển đổi DS18B20 12-bit bất đồng bộ và đọc kết quả
+Firmware `0.4.0` yêu cầu chuyển đổi DS18B20 12-bit bất đồng bộ và đọc kết quả
 sau ít nhất `750 ms`; payload không nói rằng vòng lặp đã chờ. Pull-up nội yếu
 chỉ là fallback prototype, không thay đổi contract và không thay thế pull-up
 ngoài 4,7 kΩ của wearable.
@@ -157,23 +158,70 @@ trạng thái. Đây chỉ là nghi ngờ ngã trong demo, luôn cần người 
   "uptime_ms": 43500,
   "online": false,
   "reason": "connection_lost",
+  "command_session_id": "70f3a908-cb7d-4512-a286-52f79d48d311",
+  "correlation_id": null,
   "system": {
     "rssi_dbm": -55,
     "free_heap": 35980,
-    "fw": "0.3.1",
+    "fw": "0.4.0",
     "faults": []
   }
 }
 ```
 
-Status được retain. Node/simulator đặt Last Will `online=false`; sau khi kết
-nối thành công phải ghi đè bằng status `online=true`. Edge vẫn áp dụng timeout
-nhận dữ liệu vì mất mạng bất thường có thể làm Last Will đến trễ.
+`command_session_id` và `correlation_id` là field tùy chọn. Session nonce được
+node sinh mới cho boot hiện tại và không do launcher tự chọn. Receipt thực thi
+portal dùng `reason="provisioning_started"` cùng
+`correlation_id=<command_id>`. Heartbeat trực tiếp được publish non-retained để
+edge chứng minh node đang live trước khi phát command; trạng thái connection và
+Last Will vẫn dùng retained state. Sau kết nối thành công, node phải ghi đè Last
+Will `online=false` bằng status online. Edge vẫn áp dụng timeout nhận dữ liệu vì
+mất mạng bất thường có thể làm Last Will đến trễ.
+
+Các reason phục hồi hợp lệ gồm:
+
+- `recovered_provisioning`
+- `recovered_wifi_profile`
+- `recovered_broker_ip_change`
+- `recovered_dns_fallback`
+- `recovered_mqtt_transport`
+
+Chúng mở connection epoch mới và được lưu riêng thành
+`last_recovery_reason/last_recovery_at`. Heartbeat sau đó chỉ cập nhật
+`last_status_at`, không xóa transition/recovery gần nhất.
+
+## Command `health.command.v1`
+
+```json
+{
+  "schema": "health.command.v1",
+  "device_id": "health-node-01",
+  "target_boot_id": "73f77b235fc24b29a6f8268b396ca69e",
+  "command_id": "4ec4058a-6fe6-4496-a79a-802d8805bb35",
+  "command_session_id": "70f3a908-cb7d-4512-a286-52f79d48d311",
+  "action": "open_provisioning",
+  "expires_uptime_ms": 73400
+}
+```
+
+Command chỉ được edge publish QoS 1, `retain=false` vào topic có đúng boot hiện
+tại. `command_id` và `command_session_id` là UUID; expiry không quá 30 giây
+phía trước theo miền `uptime_ms` modulo `2^32`. Node từ chối sai device, boot,
+session, action, expiry hoặc command trùng trong bốn ID gần nhất. Vì
+PubSubClient không đưa cờ retain cho subscriber, boot-specific topic, nonce và
+expiry là lớp chống replay bắt buộc.
+
+MQTT PUBACK/broker ACK không phải execution receipt. Chỉ status
+`provisioning_started` có đúng `correlation_id=command_id` chứng minh node đã
+thực thi yêu cầu. API tạo command là
+`POST /api/v1/devices/{device_id}/commands/open-provisioning`; body có thể rỗng
+hoặc mang `expected_command_session_id` để fail closed khi session vừa đổi.
 
 ## QoS và dữ liệu cá nhân
 
 - Firmware dùng QoS 0 cho telemetry do giới hạn PubSubClient; consumer phải
   chịu được bản tin trùng và khoảng trống dữ liệu.
-- Không retain telemetry hoặc event; chỉ retain status.
+- Command dùng QoS 1 và luôn `retain=false`. Không retain telemetry/event hoặc
+  heartbeat; retained status chỉ biểu diễn connection state/Last Will.
 - Không đưa tên, số điện thoại, bệnh án hoặc định danh cá nhân vào topic/payload.
 - Edge lưu thêm thời điểm nhận từ đồng hồ laptop; đó là timestamp dùng cho lịch sử.

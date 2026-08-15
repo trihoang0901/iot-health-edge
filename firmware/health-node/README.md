@@ -3,11 +3,17 @@
 PlatformIO firmware for a NodeMCU ESP8266 prototype that samples MAX30102, a
 supported MPU-6050 or MPU-6500-compatible motion sensor, and a powered
 three-wire DS18B20 probe, then
-publishes quality-tagged MQTT telemetry.
+publishes quality-tagged MQTT telemetry. Source `0.4.0` also keeps up to three
+Wi-Fi profiles, re-resolves a broker hostname after network changes, and can
+open a bounded captive portal without reflashing the node.
 
 > This is a non-clinical teaching and demonstration prototype. It does not
 > diagnose, treat, dispatch emergency services, or provide medical-grade heart
 > rate, SpO2, wrist-surface temperature, or fall detection.
+
+The `0.4.0` source has native-test and build-only evidence. Hardware recovery,
+portal heap and soak acceptance are still pending; the `0.3.1` boot IDs and
+measurements later in this file remain historical evidence and are not relabeled.
 
 ## Wiring
 
@@ -28,14 +34,14 @@ The ESP8266 GPIO pins are not 5 V tolerant.
 A DS18B20 DATA line needs a **4.7 kOhm pull-up to 3.3 V**. Connect VDD to 3.3 V,
 GND to the common ground, and DATA to D5/GPIO14. Parasite-power mode is rejected
 because the asynchronous conversion path does not provide a strong pull-up.
-Firmware `0.3.1` also enables the ESP8266's weak internal pull-up as a fallback
-for short prototype wiring. That fallback is not a substitute for the external
+Source `0.4.0` retains the ESP8266 weak internal pull-up that was exercised on
+hardware by firmware `0.3.1`. That fallback is not a substitute for the external
 4.7 kOhm resistor; a stable wearable build still requires the external
 DATA-to-3.3 V pull-up.
 The probe reports local wrist-surface contact temperature only; it does not
 measure core body temperature and is not a clinical thermometer.
 
-Firmware `0.3.1` probes the motion sensor at I2C address `0x68` and then reads
+Source `0.4.0` probes the motion sensor at I2C address `0x68` and then reads
 register `WHO_AM_I` (`0x75`). It accepts only `0x68` for MPU-6050 or `0x70` for
 an MPU-6500-compatible device. The I2C address and identity value are different
 checks: an address scan alone is not proof that the supported sensor is ready.
@@ -59,18 +65,39 @@ button only changes the firmware alarm when explicitly enabled.
 ## Configure, build, and flash
 
 1. Install PlatformIO Core or use the PlatformIO IDE extension.
-2. Copy `include/secrets.example.h` to `include/secrets.h`.
-3. Put the hotspot credentials, laptop MQTT broker IPv4 address, the
-   `health_node` broker account, and `DEVICE_ID` in the local file. The device
-   ID must match the value passed to `Initialize-Mosquitto.ps1` (the default is
-   `health-node-01`). Never commit the local file.
-4. Connect the NodeMCU with a data-capable USB cable.
-5. Run:
+2. Copy `include/secrets.example.h` to the ignored `include/secrets.h`. These
+   values bootstrap the first `0.4.0` connection; MQTT credentials remain here
+   and are never accepted by the portal.
+3. Generate the ignored `include/provisioning_secret.h` with launcher `Flash`.
+   It creates a random 20-character AP password and protects the laptop copy
+   with Windows DPAPI. For a manual build only, copy
+   `include/provisioning_secret.example.h` and replace its placeholder.
+4. Set a standard DNS/FQDN or safe IPv4 broker endpoint, the `health_node`
+   account, and `DEVICE_ID`. The ID must match `Initialize-Mosquitto.ps1`
+   (default `health-node-01`). Never commit either local header.
+5. Connect the NodeMCU with a data-capable USB cable and deliberately flash
+   `0.4.0` once:
 
 ```powershell
 pio run
 pio run --target upload
 pio device monitor
+```
+
+The root launcher is the supported Windows path:
+
+```powershell
+.\START-IOT-HEALTH-EDGE.bat Flash -Port COM3 -NoPause
+```
+
+Only `Flash` uploads the application image; it never erases or uploads
+LittleFS. `Start`, `Doctor`, `Verify`, `OpenPortal`, and `ShowPortalAccess` do
+not upload firmware. Native recovery tests and a build-only check require no
+USB:
+
+```powershell
+pio test -e native
+pio run -e nodemcuv2
 ```
 
 The project pins the tested dependency targets in `platformio.ini`. To enable
@@ -89,6 +116,7 @@ The firmware only uses these per-device topics:
 iot-health/v1/devices/{device_id}/telemetry
 iot-health/v1/devices/{device_id}/event
 iot-health/v1/devices/{device_id}/status
+iot-health/v1/devices/{device_id}/command/{boot_id}
 ```
 
 Telemetry uses schema `health.telemetry.v3`. `vitals` contains HR and SpO2;
@@ -98,9 +126,18 @@ when invalid; JSON `NaN` is never emitted. `motion.accel_g` and
 `motion.gyro_dps` are vector magnitudes. `quality.ppg` is a bounded 0..1
 signal-quality heuristic, not a clinical confidence score.
 
-Fall events use schema `health.event.v1` and type `fall_suspected_demo`. The
-status topic uses retained `health.status.v1` messages and a retained MQTT Last
-Will with `online=false`.
+Fall events use schema `health.event.v1` and type `fall_suspected_demo`.
+Connection transitions and the MQTT Last Will are retained
+`health.status.v1` state. The 5-second heartbeat is deliberately non-retained
+and carries a node-generated command-session UUID so edge can require fresh
+live evidence before sending a command.
+
+Edge publishes strict `health.command.v1` commands at QoS 1 with
+`retain=false`. The node subscribes only to its current boot topic and rejects
+the wrong device, boot, session, action, expiry, or any of the four most recent
+command IDs. A valid `open_provisioning` command is acknowledged by status
+`reason="provisioning_started"` with `correlation_id=command_id`; broker PUBACK
+alone is not execution evidence.
 
 PubSubClient publishes at QoS 0. To reduce loss without pretending to provide
 delivery guarantees, each fall event is kept in a four-entry RAM queue and sent
@@ -110,11 +147,37 @@ replaced and the sticky `event_queue_overflow` fault appears in later
 telemetry/status. Telemetry is intentionally not queued, so reconnecting cannot
 flood the broker with stale readings.
 
+## Network recovery and captive portal
+
+Runtime network configuration is a fixed-layout LittleFS record with schema
+version, generation and CRC32. Two slots preserve one committed record while a
+portal save is written as a candidate through a temporary file and rename.
+Boot ignores candidates. A candidate is promoted only after Wi-Fi association,
+DHCP, DNS or same-subnet fallback, MQTT authentication and command subscription
+succeed; an unsuccessful trial or power loss leaves the previous committed
+slot selected. Firmware never auto-formats LittleFS.
+
+The controller tries the last-good profile first and then enabled profiles by
+priority. Each profile receives 8 seconds for association/DHCP; only a complete
+failed sweep enters jittered 1-to-30-second backoff. A new network/IP invalidates
+the resolved broker address. DNS is bounded to 1.5 seconds and TCP/CONNACK to
+roughly 2 seconds. MQTT protocol, client-ID and credential CONNACK errors retry
+on the same profile without roaming or opening a portal; link, DNS and TCP
+failures may move to another profile.
+
+After 45 seconds without a valid path, the node opens
+`HealthNode-Setup-<suffix>` once per boot in `WIFI_AP_STA`. The WPA2 portal has
+a fixed 300-second deadline, one-use CSRF nonce, a 4096-byte POST limit, escaped
+HTML, no password prefill, and no MQTT/OTA/reset/device-information surface.
+Empty password fields preserve existing passwords; deletion is explicit and
+open Wi-Fi profiles are rejected. After timeout, reset or power-cycle creates
+the next local portal window.
+
 ## Bounded sampling behavior
 
 - The supported MPU-6050/MPU-6500-compatible motion sensor is sampled at 50 Hz.
-- MAX30102 is drained every loop. Firmware `0.3.1` retains the `0.2.2` recovery
-  behavior and does not reject a read from
+- MAX30102 is drained every loop. Source `0.4.0` retains the recovery behavior
+  first validated on `0.2.2`/`0.3.1` and does not reject a read from
   a pre-read `OVF_COUNTER`: after a startup overflow, a saturated counter can
   require a complete sample to be consumed before it clears, so using it as a
   gate can trap sampling in a clear-and-return loop.
@@ -136,9 +199,10 @@ flood the broker with stale readings.
   between MAX30102 and motion-sensor work; a failed bus is released/reinitialized,
   both sensors are marked unavailable, and an invalid motion sample cancels an
   in-progress fall candidate.
-- Wi-Fi and MQTT retries use exponential backoff from 1 to 30 seconds with
-  jitter. An MQTT TCP attempt can still block for the configured 1-second socket
-  timeout, which is why FIFO backlog invalidates the current PPG window.
+- Wi-Fi full sweeps and MQTT retries use exponential backoff from 1 to 30
+  seconds with jitter. DNS can block for up to 1.5 seconds and a TCP/CONNACK
+  attempt for roughly 2 seconds, which is why FIFO backlog invalidates the
+  current PPG window.
 
 PubSubClient connection establishment is synchronous. TCP/DNS and MQTT CONNACK
 can therefore interrupt motion/fall sampling for roughly two seconds per

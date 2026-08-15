@@ -1,12 +1,65 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from datetime import UTC, datetime, timedelta
 
 import pytest
 
 from edge.db import Database
 from edge.schemas import Telemetry, TelemetryV2, TelemetryV3
+
+
+def test_initialize_additively_migrates_device_recovery_and_command_columns(tmp_path):
+    path = tmp_path / "legacy-devices.db"
+    with sqlite3.connect(path) as connection:
+        connection.executescript(
+            """
+            CREATE TABLE devices (
+                device_id TEXT PRIMARY KEY,
+                boot_id TEXT,
+                online INTEGER NOT NULL DEFAULT 0 CHECK (online IN (0, 1)),
+                last_seen_at TEXT,
+                last_status_at TEXT,
+                status_reason TEXT,
+                rssi_dbm INTEGER,
+                free_heap INTEGER,
+                fw TEXT,
+                faults_json TEXT NOT NULL DEFAULT '[]',
+                updated_at TEXT NOT NULL
+            );
+            INSERT INTO devices (
+                device_id, boot_id, online, last_seen_at, last_status_at,
+                status_reason, faults_json, updated_at
+            ) VALUES (
+                'health-node-01', 'boot-old', 1,
+                '2026-08-04T12:00:00.000Z', '2026-08-04T12:00:00.000Z',
+                'connected', '[]', '2026-08-04T12:00:00.000Z'
+            );
+            """
+        )
+
+    database = Database(path)
+    database.initialize()
+
+    with database.connection() as connection:
+        columns = {
+            row["name"]
+            for row in connection.execute("PRAGMA table_info(devices)").fetchall()
+        }
+    assert {
+        "status_reason_at",
+        "last_recovery_reason",
+        "last_recovery_at",
+        "last_status_reason",
+        "last_status_retained",
+        "command_session_id",
+        "correlation_id",
+    } <= columns
+    device = database.get_device("health-node-01")
+    assert device["status_reason"] == "connected"
+    assert device["last_recovery_reason"] is None
+    assert device["command_session_id"] is None
 
 
 def test_outer_transaction_rolls_back_device_session_and_telemetry(

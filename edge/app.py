@@ -6,6 +6,7 @@ from hashlib import sha256
 from pathlib import Path
 import re
 from typing import Annotated, Any, AsyncIterator, Literal
+from uuid import UUID, uuid4
 
 from fastapi import FastAPI, HTTPException, Query, Request, status
 from fastapi.responses import HTMLResponse
@@ -18,7 +19,7 @@ from .experiments import ExperimentNotFoundError, ExperimentRegistry
 from .mqtt_client import EdgeMqttClient
 from .notifications import TelegramApiClient, TelegramNotifier
 from .rules import RuleEngine
-from .schemas import AckRequest
+from .schemas import AckRequest, DeviceCommand, OpenProvisioningRequest
 from .service import IngestionService
 from simulator.mqtt_simulator import SCENARIOS
 from simulator.network_profiles import public_profiles
@@ -27,6 +28,8 @@ from simulator.network_profiles import public_profiles
 STATIC_DIR = Path(__file__).with_name("static")
 WINDOW_RE = re.compile(r"^(?P<minutes>[1-9][0-9]*)(?:m)?$")
 STATIC_ASSET_NAMES = ("favicon.svg", "styles.css", "app.js")
+COMMAND_TTL_MS = 30_000
+UINT32_MODULUS = 2**32
 
 
 def _dashboard_asset_version() -> str:
@@ -268,6 +271,16 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 "transport": "TCP",
                 "topic_namespace": "iot-health/v1/devices/{device_id}/{stream}",
                 "streams": ["telemetry", "event", "status"],
+                "command_topic_namespace": (
+                    "iot-health/v1/devices/{device_id}/command/{boot_id}"
+                ),
+                "command": {
+                    "schema": "health.command.v1",
+                    "actions": ["open_provisioning"],
+                    "qos": 1,
+                    "retain": False,
+                    "execution_receipt_reason": "provisioning_started",
+                },
             },
             "scenarios": list(SCENARIOS),
             "profiles": public_profiles(),
@@ -308,6 +321,125 @@ def create_app(settings: Settings | None = None) -> FastAPI:
         if device is None:
             raise HTTPException(status_code=404, detail="Không tìm thấy thiết bị")
         return _effective_device(device, settings.offline_after_seconds)
+
+    @app.post(
+        "/api/v1/devices/{device_id}/commands/open-provisioning",
+        status_code=status.HTTP_202_ACCEPTED,
+    )
+    def open_provisioning(
+        device_id: str,
+        body: OpenProvisioningRequest | None = None,
+    ) -> dict[str, Any]:
+        device = database.get_device(device_id)
+        if device is None:
+            raise HTTPException(status_code=404, detail="Không tìm thấy thiết bị")
+
+        command_mqtt = app.state.mqtt
+        mqtt_health = command_mqtt.health() if command_mqtt is not None else {}
+        if not (
+            command_mqtt is not None
+            and mqtt_health.get("connected") is True
+            and mqtt_health.get("subscribed") is True
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Kênh lệnh MQTT chưa sẵn sàng",
+            )
+
+        now = utc_now()
+        effective = _effective_device(device, settings.offline_after_seconds)
+        last_status_at = device.get("last_status_at")
+        if not effective.get("online") or not last_status_at:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Thiết bị không có trạng thái trực tuyến còn mới",
+            )
+        status_received = datetime.fromisoformat(last_status_at.replace("Z", "+00:00"))
+        status_age_seconds = (now - status_received).total_seconds()
+        if status_age_seconds < 0 or status_age_seconds > settings.offline_after_seconds:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Trạng thái trực tuyến của thiết bị đã cũ",
+            )
+        if (
+            device.get("last_status_reason") != "heartbeat"
+            or device.get("last_status_retained") is not False
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Chưa nhận heartbeat trực tiếp, không-retained của thiết bị",
+            )
+
+        boot_id = device.get("boot_id")
+        stored_session = device.get("command_session_id")
+        if not boot_id or not stored_session:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Thiết bị chưa công bố command session hiện tại",
+            )
+        try:
+            command_session_id = UUID(stored_session)
+        except (TypeError, ValueError) as exc:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Command session hiện tại không hợp lệ",
+            ) from exc
+        if (
+            body is not None
+            and body.expected_command_session_id is not None
+            and body.expected_command_session_id != command_session_id
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Command session đã thay đổi; hãy tải lại trạng thái thiết bị",
+            )
+
+        latest = database.latest_telemetry(device_id)
+        if latest is None or latest.get("boot_id") != boot_id:
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Chưa có telemetry của boot hiện tại để tính hạn lệnh",
+            )
+        latest_received = datetime.fromisoformat(
+            str(latest["received_at"]).replace("Z", "+00:00")
+        )
+        telemetry_age_seconds = (now - latest_received).total_seconds()
+        if (
+            telemetry_age_seconds < 0
+            or telemetry_age_seconds > settings.offline_after_seconds
+        ):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="Telemetry của boot hiện tại đã cũ",
+            )
+        estimated_uptime_ms = (
+            int(latest["uptime_ms"]) + int(telemetry_age_seconds * 1000)
+        ) % UINT32_MODULUS
+        expires_uptime_ms = (estimated_uptime_ms + COMMAND_TTL_MS) % UINT32_MODULUS
+        command = DeviceCommand(
+            schema="health.command.v1",
+            device_id=device_id,
+            target_boot_id=boot_id,
+            command_id=uuid4(),
+            command_session_id=command_session_id,
+            action="open_provisioning",
+            expires_uptime_ms=expires_uptime_ms,
+        )
+        try:
+            mid = command_mqtt.publish_command(command)
+        except RuntimeError as exc:
+            raise HTTPException(
+                status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+                detail="Không thể xếp lệnh MQTT vào hàng gửi",
+            ) from exc
+        return {
+            **command.model_dump(mode="json", by_alias=True),
+            "qos": 1,
+            "retain": False,
+            "mqtt_mid": mid,
+            "broker_acked": True,
+            "execution_acknowledged": False,
+        }
 
     @app.get("/api/v1/devices/{device_id}/latest")
     def get_latest(device_id: str) -> dict[str, Any]:

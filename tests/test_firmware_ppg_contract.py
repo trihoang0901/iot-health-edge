@@ -28,4 +28,4 @@ def test_production_firmware_has_no_ppg_diagnostic_build_path():
 def test_ppg_recovery_remains_in_current_firmware_release():
     config = APP_CONFIG.read_text(encoding="utf-8")
 
-    assert 'constexpr char kFirmwareVersion[] = "0.3.1";' in config
+    assert 'constexpr char kFirmwareVersion[] = "0.4.0";' in config

@@ -43,16 +43,12 @@ Không tạo tệp password rỗng thủ công. Nếu chủ động tạo lại 
 
 - Đừng dùng RSSI hoặc thời điểm cũ trên dashboard làm bằng chứng kết nối hiện
   tại; khi offline, UI chỉ có thể đang hiển thị giá trị cuối đã lưu.
-- Nếu Serial có `wifi_connected` nhưng lặp `mqtt_connect_failed state=-2`, hãy
-  kiểm tra endpoint trước: chạy `ipconfig`, so IPv4 của adapter đang phục vụ
-  NodeMCU với `MQTT_HOST` trong
-  `firmware\health-node\include\secrets.h`. IP hotspot/router có thể đổi sau
-  khi kết nối lại.
-- Chạy `START-IOT-HEALTH-EDGE.bat`. Trong workflow broker local, launcher dừng
-  trước Docker/upload nếu `MQTT_HOST` không khớp bất kỳ IPv4 non-loopback đang
-  hoạt động nào trên laptop. Gate này không in SSID hoặc mật khẩu.
-- Sau khi sửa `secrets.h`, phải build và nạp lại firmware; chỉ sửa file không
-  thay đổi chương trình đang chạy trên NodeMCU.
+- Nếu Serial có `wifi_connected` nhưng lặp `mqtt_connect_failed state=-2`, chạy
+  mode `Doctor`, kiểm tra DNS của đúng Wi-Fi và fallback IPv4 đúng subnet. Sau
+  lần flash nâng cấp đầu tiên, endpoint runtime nằm trong LittleFS; giá trị
+  bootstrap cũ trong `secrets.h` không phản ánh cấu hình đang chạy.
+- Chạy `START-IOT-HEALTH-EDGE.bat Start -NoPause` để khởi động stack mà không
+  upload. Chỉ mode `Flash` đọc bootstrap và nạp firmware.
 - Xác nhận Mosquitto đang map cổng 1883, Windows Firewall cho phép subnet
   Private, client hotspot không bị cô lập và tài khoản `health_node` đúng ACL.
 - Firmware vật lý hiện đã lên `0.3.1`. Sau hard reset, Serial boot
@@ -218,3 +214,37 @@ best-effort đã chấp nhận, không dùng kênh này cho tình huống cấp 
 ## Tuyên bố 5G không khớp thực tế
 
 Nếu broker là laptop cùng hotspot với NodeMCU, route có thể chỉ ở LAN. Không sửa báo cáo bằng suy đoán; đổi nhãn thành demo LAN hoặc chuyển broker/edge tới đầu xa rồi ghi bằng chứng tuyến và phép đo.
+
+## Launcher và phục hồi mạng
+
+### `Start` chạy nhưng chưa thấy telemetry mới
+
+- Đây là cảnh báo, không phải lỗi bootstrap: `Start` cố ý không đọc
+  `firmware/health-node/include/secrets.h` và không tự upload.
+- Chạy `START-IOT-HEALTH-EDGE.bat Doctor -NoPause` để tách lỗi DNS, TCP,
+  authentication và ACL ở phía laptop.
+- DNS Windows thành công chưa chứng minh ESP8266 phân giải được trên Wi-Fi hiện
+  tại. Kiểm tra DNS/router của đúng profile hoặc fallback IPv4 thuộc subnet đó.
+- Nếu mọi mạng đã lưu đều mất, node tự mở AP khoảng `45±5 s`; portal đóng sau
+  `300±5 s`. Reset/power-cycle tạo cửa sổ mới sau timeout.
+
+### `OpenPortal` báo node offline hoặc hết thời gian
+
+Lệnh này chỉ hoạt động khi node còn MQTT online và edge vừa thấy status sống có
+session nonce. Launcher không coi HTTP 202 hay MQTT PUBACK là thành công; nó
+phải nhận `provisioning_started` đúng correlation ID. Nếu node đã mất mạng,
+dùng AP provisioning tự mở hoặc reset/power-cycle, không lặp command từ xa.
+
+### Không xem được mật khẩu AP
+
+Chạy `START-IOT-HEALTH-EDGE.bat ShowPortalAccess -NoPause` bằng đúng Windows user
+đã chạy `Flash`. DPAPI thường không giải mã được khi đổi user/máy. Nếu chưa từng
+chạy `Flash`, secret chưa được tạo. Không dán cipher/header vào log hỗ trợ;
+clipboard chỉ được dùng sau khi bấm **Sao chép** trong cửa sổ.
+
+### `Flash` không tìm thấy COM hoặc PlatformIO
+
+`Flash` là mode duy nhất cần COM/USB và PlatformIO. Dùng `-Port COMx` nếu adapter
+không mang tên CH340. Quy trình chỉ dùng target application upload; không thêm
+`erase`, `erasefs`, `uploadfs` hoặc target filesystem vì sẽ làm mất LittleFS đã
+commit.

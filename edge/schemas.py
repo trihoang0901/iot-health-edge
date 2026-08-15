@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import re
 from typing import Annotated, Literal, TypeAlias
+from uuid import UUID
 
 from pydantic import (
     BaseModel,
@@ -352,7 +353,23 @@ class DeviceStatus(StrictModel):
     uptime_ms: Annotated[int, Field(ge=0, le=4_294_967_295)]
     online: bool
     reason: Annotated[str, StringConstraints(min_length=1, max_length=80)]
+    command_session_id: UUID | None = None
+    correlation_id: UUID | None = None
     system: SystemMetrics
+
+
+class OpenProvisioningRequest(StrictModel):
+    expected_command_session_id: UUID | None = None
+
+
+class DeviceCommand(StrictModel):
+    schema_version: Literal["health.command.v1"] = Field(alias="schema")
+    device_id: DeviceId
+    target_boot_id: BootId
+    command_id: UUID
+    command_session_id: UUID
+    action: Literal["open_provisioning"]
+    expires_uptime_ms: Annotated[StrictInt, Field(ge=0, le=4_294_967_295)]
 
 
 class AckRequest(StrictModel):

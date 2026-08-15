@@ -20,7 +20,7 @@ def test_ds18b20_dependencies_pin_and_firmware_version_are_pinned():
     assert "milesburton/DallasTemperature@4.0.6" in platformio
     assert "paulstoffregen/OneWire@2.3.8" in platformio
     assert "DHT sensor library" not in platformio
-    assert 'constexpr char kFirmwareVersion[] = "0.3.1";' in config
+    assert 'constexpr char kFirmwareVersion[] = "0.4.0";' in config
     assert "constexpr uint8_t kDs18b20Pin = D5;" in config
     assert "constexpr uint32_t kTemperatureConversionMs = 750;" in config
 

@@ -5,7 +5,8 @@ Broker:
 
 - từ chối kết nối ẩn danh;
 - lưu dữ liệu bền vững trong Docker volume;
-- dùng ACL để node chỉ ghi đúng ba topic của `device_id` đã cấu hình;
+- dùng ACL để node chỉ ghi ba stream và chỉ đọc command subtree của đúng
+  `device_id`; edge đọc ba stream và ghi command subtree;
 - không chứa mật khẩu hoặc hash mật khẩu trong mã nguồn.
 
 Từ PowerShell tại thư mục gốc dự án:
@@ -47,6 +48,36 @@ Lệnh `down` giữ cả `mosquitto-data` và `edge-data`. Không thêm `--volum
 khi chủ động muốn xóa dữ liệu đã lưu.
 
 Script gọi `mosquitto_passwd` tương tác bên trong container. Mật khẩu không được đưa vào tham số dòng lệnh và chỉ hash được ghi vào `deploy/mosquitto/generated/passwords`. Chạy lại có `-Force` sẽ thay toàn bộ tệp tài khoản hiện có, vì vậy chỉ dùng khi chủ động xoay vòng thông tin đăng nhập.
+
+## Nâng ACL cho command mà không xoay mật khẩu
+
+Khi password database đã tồn tại và chỉ cần thêm quyền command cho firmware
+`0.4.0`, dùng migration ACL-only:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\deploy\scripts\Initialize-Mosquitto.ps1 -AclOnly
+```
+
+`-AclOnly` không gọi `mosquitto_passwd`, không nhận plaintext và không sửa/tạo
+lại password hash. Script render ACL vào file tạm, kiểm tra không còn
+placeholder, thay file atomically, restart broker rồi probe authentication,
+SUBACK/read và publish command. Nếu validate/restart/probe lỗi, ACL cũ được
+rollback; password database không tham gia transaction. Không dùng `-Force`
+để thay thế `-AclOnly`, vì `-Force` có nghĩa chủ động xoay toàn bộ credential.
+Probe quyền publish dùng MQTT v5 để đọc PUBACK reason; đây chỉ là công cụ kiểm
+tra ACL, không đổi protocol MQTT 3.1.1 của firmware.
+
+Ma trận quyền sau migration:
+
+| Principal | Quyền |
+|---|---|
+| `health_edge` | read `telemetry`, `event`, `status` của các node; write `command/+` |
+| `health_node` | write ba stream của đúng device; read `command/+` của đúng device |
+| anonymous/cross-device | deny |
+
+Command provisioning dùng QoS 1 và bắt buộc `retain=false`. Broker PUBACK chỉ
+xác nhận publish đã được broker nhận, không xác nhận portal đã mở; execution
+receipt là status `provisioning_started` mang đúng correlation ID.
 
 Để thêm node khác, tạo một bộ triển khai/ACL phù hợp hoặc mở rộng generator có kiểm soát; không dùng chung tài khoản thiết bị trong bản triển khai thật.
 

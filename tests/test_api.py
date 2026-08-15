@@ -16,12 +16,13 @@ from edge.service import InboundMessage
 from simulator.experiment import PollObservation, SOURCE_FILES, SOURCE_FINGERPRINT_SCOPE
 
 
-def ingest(client, kind, payload):
+def ingest(client, kind, payload, *, retain=None):
     return client.app.state.ingestion.process_message(
         InboundMessage(
             topic=f"iot-health/v1/devices/{payload['device_id']}/{kind}",
             payload=json.dumps(payload).encode(),
             received_at=datetime.now(UTC),
+            retain=retain,
         )
     )
 
@@ -61,6 +62,13 @@ def test_runtime_is_sanitized_and_capabilities_are_truthful(client):
     assert capabilities.status_code == 200
     assert capabilities.json()["course_track"] == "IoT Protocol"
     assert capabilities.json()["protocol"]["version"] == "3.1.1"
+    assert capabilities.json()["protocol"]["command"] == {
+        "schema": "health.command.v1",
+        "actions": ["open_provisioning"],
+        "qos": 1,
+        "retain": False,
+        "execution_receipt_reason": "provisioning_started",
+    }
     assert capabilities.json()["claims"]["measured_5g"] is False
     assert capabilities.json()["claims"]["primary_latency_kind"] == (
         "schedule_to_api_polling_upper_bound"
@@ -494,4 +502,143 @@ def test_missing_resources_and_invalid_ack_are_rejected(client):
     response = client.post(
         "/api/v1/alerts/missing/ack", json={"actor": "   ", "note": ""}
     )
+    assert response.status_code == 422
+
+
+def test_open_provisioning_echoes_node_session_and_publishes_boot_scoped_command(
+    client, valid_telemetry_payload
+):
+    session_id = "3bd40a56-6e62-4bdf-9b1e-74f8611dcd5a"
+    valid_telemetry_payload["uptime_ms"] = 4_294_967_000
+    assert ingest(client, "telemetry", valid_telemetry_payload).accepted
+
+    def status_payload(seq, reason):
+        return {
+            "schema": "health.status.v1",
+            "device_id": "health-node-01",
+            "boot_id": "boot-0001",
+            "seq": seq,
+            "uptime_ms": 4_294_967_000 + seq,
+            "online": True,
+            "reason": reason,
+            "command_session_id": session_id,
+            "system": {
+                "rssi_dbm": -55,
+                "free_heap": 30000,
+                "fw": "0.4.0",
+                "faults": [],
+            },
+        }
+
+    assert ingest(
+        client, "status", status_payload(10, "connected"), retain=False
+    ).accepted
+    assert ingest(
+        client, "status", status_payload(11, "heartbeat"), retain=False
+    ).accepted
+
+    class RecordingMqtt:
+        def __init__(self):
+            self.commands = []
+
+        @staticmethod
+        def health():
+            return {"connected": True, "subscribed": True}
+
+        def publish_command(self, command):
+            self.commands.append(command)
+            return 41
+
+    mqtt = RecordingMqtt()
+    client.app.state.mqtt = mqtt
+
+    response = client.post(
+        "/api/v1/devices/health-node-01/commands/open-provisioning"
+    )
+
+    assert response.status_code == 202
+    body = response.json()
+    assert body["schema"] == "health.command.v1"
+    assert body["target_boot_id"] == "boot-0001"
+    assert body["command_session_id"] == session_id
+    assert body["action"] == "open_provisioning"
+    assert body["qos"] == 1
+    assert body["retain"] is False
+    assert body["broker_acked"] is True
+    assert body["execution_acknowledged"] is False
+    assert body["mqtt_mid"] == 41
+    assert 0 <= body["expires_uptime_ms"] <= 4_294_967_295
+    assert body["expires_uptime_ms"] < 60_000  # wrap-safe near uint32 rollover
+    assert len(mqtt.commands) == 1
+    assert str(mqtt.commands[0].command_id) == body["command_id"]
+
+    stale = client.post(
+        "/api/v1/devices/health-node-01/commands/open-provisioning",
+        json={
+            "expected_command_session_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"
+        },
+    )
+    assert stale.status_code == 409
+    assert len(mqtt.commands) == 1
+
+    receipt = status_payload(12, "provisioning_started")
+    receipt["correlation_id"] = body["command_id"]
+    assert ingest(client, "status", receipt, retain=False).accepted
+    device = client.get("/api/v1/devices/health-node-01").json()
+    assert device["status_reason"] == "provisioning_started"
+    assert device["correlation_id"] == body["command_id"]
+    assert device["command_session_id"] == session_id
+
+
+def test_open_provisioning_rejects_retained_or_missing_direct_heartbeat(
+    client, valid_telemetry_payload
+):
+    assert ingest(client, "telemetry", valid_telemetry_payload).accepted
+    retained_heartbeat = {
+        "schema": "health.status.v1",
+        "device_id": "health-node-01",
+        "boot_id": "boot-0001",
+        "seq": 10,
+        "uptime_ms": 1010,
+        "online": True,
+        "reason": "heartbeat",
+        "command_session_id": "3bd40a56-6e62-4bdf-9b1e-74f8611dcd5a",
+        "system": {
+            "rssi_dbm": -55,
+            "free_heap": 30000,
+            "fw": "0.4.0",
+            "faults": [],
+        },
+    }
+    assert ingest(client, "status", retained_heartbeat, retain=True).accepted
+
+    class ReadyMqtt:
+        @staticmethod
+        def health():
+            return {"connected": True, "subscribed": True}
+
+        @staticmethod
+        def publish_command(_command):
+            raise AssertionError("retained heartbeat must not authorize a command")
+
+    client.app.state.mqtt = ReadyMqtt()
+    response = client.post(
+        "/api/v1/devices/health-node-01/commands/open-provisioning",
+        json={},
+    )
+
+    assert response.status_code == 409
+    assert "không-retained" in response.json()["detail"]
+
+
+def test_open_provisioning_does_not_trust_caller_supplied_session(
+    client, valid_telemetry_payload
+):
+    assert ingest(client, "telemetry", valid_telemetry_payload).accepted
+
+    response = client.post(
+        "/api/v1/devices/health-node-01/commands/open-provisioning",
+        json={"command_session_id": "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa"},
+    )
+
     assert response.status_code == 422

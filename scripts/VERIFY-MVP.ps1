@@ -141,7 +141,14 @@ try {
             (Join-Path $root '.platformio-venv\Scripts\platformio.exe'),
             (Join-Path $env:USERPROFILE '.platformio\penv\Scripts\platformio.exe')
         ) | Where-Object { Test-Path -LiteralPath $_ } | Select-Object -First 1
-        Invoke-VerificationGate -Name 'Firmware build-only nodemcuv2' -Required $false -Action {
+        Invoke-VerificationGate -Name 'Firmware native recovery regression' -Action {
+            if (-not $platformio) {
+                throw 'platformio_not_found'
+            }
+            & $platformio test --project-dir $firmwareDir --environment native
+            $script:LastNativeExitCode = $LASTEXITCODE
+        }
+        Invoke-VerificationGate -Name 'Firmware build-only nodemcuv2' -Action {
             if (-not $platformio) {
                 throw 'platformio_not_found'
             }
@@ -150,6 +157,13 @@ try {
         }
     }
     else {
+        $results.Add([pscustomobject]@{
+            name = 'Firmware native recovery regression'
+            required = $false
+            status = 'not_requested'
+            duration_ms = 0
+            error_code = $null
+        })
         $results.Add([pscustomobject]@{
             name = 'Firmware build-only nodemcuv2'
             required = $false
