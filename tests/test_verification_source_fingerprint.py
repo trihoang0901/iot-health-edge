@@ -34,7 +34,14 @@ def test_verification_files_include_contract_inputs_and_skip_desktop_ini(
     files = fingerprint.verification_files()
 
     assert ".gitattributes" in files
+    assert "INSTALL-IOT-HEALTH-EDGE.bat" in files
+    assert "IOT-HEALTH-EDGE.ps1" in files
     assert "START-IOT-HEALTH-EDGE.bat" in files
+    assert "START-SOFTWARE.bat" in files
+    assert "START-HARDWARE.bat" in files
+    assert "STOP-IOT-HEALTH-EDGE.bat" in files
+    assert "STATUS-IOT-HEALTH-EDGE.bat" in files
+    assert "LOGS-IOT-HEALTH-EDGE.bat" in files
     assert "edge/app.py" in files
     assert not any(Path(relative).name.casefold() == "desktop.ini" for relative in files)
     assert "firmware/health-node/secrets.h" not in files

@@ -7,8 +7,22 @@ import pytest
 
 
 ROOT = Path(__file__).resolve().parents[1]
-LAUNCHER = ROOT / "START-IOT-HEALTH-EDGE.bat"
+LAUNCHER = ROOT / "IOT-HEALTH-EDGE.ps1"
+LEGACY_LAUNCHER = ROOT / "START-IOT-HEALTH-EDGE.bat"
 AUTH_PROBE_SCRIPT = ROOT / "deploy" / "scripts" / "Test-NodeMqttCredential.ps1"
+WRAPPERS = {
+    "INSTALL-IOT-HEALTH-EDGE.bat": "Install",
+    "START-SOFTWARE.bat": "StartSoftware",
+    "START-HARDWARE.bat": "StartHardware",
+    "START-IOT-HEALTH-EDGE.bat": "StartLegacy",
+    "STOP-IOT-HEALTH-EDGE.bat": "Stop",
+    "STATUS-IOT-HEALTH-EDGE.bat": "Status",
+    "LOGS-IOT-HEALTH-EDGE.bat": "Logs",
+}
+
+
+def _function_source(source: str, name: str, next_name: str) -> str:
+    return source.split(f"function {name}", 1)[1].split(f"function {next_name}", 1)[0]
 
 
 def test_post_upload_gate_is_fresh_v4_node_specific_and_locale_independent():
@@ -17,18 +31,18 @@ def test_post_upload_gate_is_fresh_v4_node_specific_and_locale_independent():
     assert "[Globalization.CultureInfo]::InvariantCulture" in source
     assert "[Globalization.DateTimeStyles]::AssumeUniversal" in source
     assert "[Globalization.DateTimeStyles]::AdjustToUniversal" in source
-    assert "Parse($env:UPLOAD_STARTED_UTC,$culture,$styles)" in source
-    assert "Parse($latest.received_at,$culture,$styles)" in source
+    assert "[DateTimeOffset]::UtcNow" in source
+    assert "Parse($latest.received_at, $culture, $styles)" in source
     assert "$device.online -eq $true" in source
-    assert "$received -ge $started" in source
+    assert "$received -ge $StartedAt" in source
     assert "$schema -eq 'health.telemetry.v4'" in source
     assert "$latest.system.fw -eq '0.4.0'" in source
-    post_upload_gate = source.split("Cho telemetry moi tu NodeMCU", 1)[1].split(
-        "echo [7/7] Mo dashboard", 1
-    )[0]
-    assert "set \"FINAL_CODE=1\"" in post_upload_gate
-    assert "goto :finish" in post_upload_gate
-    assert "set \"NODE_WARN=1\"" not in post_upload_gate
+    gate = _function_source(source, "Wait-FreshHardwareTelemetry", "Start-HardwareStack")
+    assert "throw 'Chua nhan telemetry v4 moi" in gate
+    hardware = _function_source(source, "Start-HardwareStack", "Stop-System")
+    assert hardware.index("'--target', 'upload'") < hardware.index(
+        "$uploadCompletedUtc = [DateTimeOffset]::UtcNow"
+    ) < hardware.index("Wait-FreshHardwareTelemetry")
 
 
 def test_launcher_timestamp_style_keeps_z_and_offset_times_in_utc():
@@ -54,33 +68,70 @@ if ($started.Offset -ne [TimeSpan]::Zero -or $received.Offset -ne [TimeSpan]::Ze
     )
 
 
+def test_native_quiet_probe_handles_powershell_51_stderr_by_exit_code():
+    powershell = shutil.which("powershell.exe")
+    if powershell is None:
+        pytest.skip("Windows PowerShell is required for native probe regression")
+
+    source = LAUNCHER.read_text(encoding="utf-8")
+    helper = "function Invoke-NativeQuiet" + _function_source(
+        source, "Invoke-NativeQuiet", "Get-ComposeBaseArguments"
+    )
+    command = (
+        helper
+        + r'''
+$ErrorActionPreference = 'Stop'
+try {
+    $rc = Invoke-NativeQuiet -FilePath 'cmd.exe' -ArgumentList @('/c', 'echo simulated-error 1>&2 & exit /b 7')
+    if ($rc -ne 7 -or $ErrorActionPreference -ne 'Stop') { exit 2 }
+    exit 0
+}
+catch {
+    exit 3
+}
+'''
+    )
+    completed = subprocess.run(
+        [powershell, "-NoLogo", "-NoProfile", "-Command", command],
+        check=False,
+        capture_output=True,
+        text=True,
+        encoding="utf-8",
+        timeout=10,
+    )
+
+    assert completed.returncode == 0
+    assert completed.stdout == ""
+    assert completed.stderr == ""
+
+
 def test_launcher_uses_local_python_module_instead_of_copied_pio_executable():
     source = LAUNCHER.read_text(encoding="utf-8")
 
-    assert '.platformio-venv\\Scripts\\python.exe' in source
-    assert '-m platformio --version' in source
-    assert '"%PIO_PYTHON%" -m platformio run' in source
-    assert 'if exist "%ROOT%.platformio-venv\\Scripts\\pio.exe"' not in source
+    assert ".platformio-venv\\Scripts\\python.exe" in source
+    assert "Invoke-NativeQuiet -FilePath $pythonPath" in source
+    assert "Prefix = @('-m', 'platformio')" in source
+    assert ".platformio-venv\\Scripts\\pio.exe" not in source
 
 
 def test_node_mqtt_auth_probe_runs_after_compose_and_before_firmware_upload():
     source = LAUNCHER.read_text(encoding="utf-8")
     probe_source = AUTH_PROBE_SCRIPT.read_text(encoding="utf-8")
 
-    compose_index = source.index("--profile full up -d --build")
-    broker_reload_index = source.index("restart mosquitto")
-    readiness_index = source.index("Cho edge API san sang cho MQTT auth probe")
-    probe_index = source.index("Test-NodeMqttCredential.ps1")
-    upload_index = source.index("--target upload")
-
-    assert compose_index < broker_reload_index < readiness_index < probe_index < upload_index
-    readiness_source = source[readiness_index:probe_index]
-    assert "/healthz" in readiness_source
-    assert "$health.database.healthy -eq $true" in readiness_source
-    assert "$health.mqtt.connected -eq $true" in readiness_source
-    assert "$health.mqtt.subscribed -eq $true" in readiness_source
-    assert "$health.ingestion.worker_alive -eq $true" in readiness_source
-    assert "$health.status -eq 'ok'" not in readiness_source
+    software = _function_source(source, "Start-SoftwareStack", "Get-PythonLauncher")
+    hardware = _function_source(source, "Start-HardwareStack", "Stop-System")
+    assert software.index("@('up', '-d', '--build')") < software.index(
+        "@('restart', 'mosquitto')"
+    ) < software.index("Wait-EdgeHealthy")
+    assert hardware.index("Start-SoftwareStack") < hardware.index(
+        "Test-NodeMqttCredential.ps1"
+    ) < hardware.index("'--target', 'upload'") < hardware.index(
+        "Wait-FreshHardwareTelemetry"
+    )
+    assert "$health.database.healthy -eq $true" in source
+    assert "$health.mqtt.connected -eq $true" in source
+    assert "$health.mqtt.subscribed -eq $true" in source
+    assert "$health.ingestion.worker_alive -eq $true" in source
     assert "ConvertTo-Json -Compress" in probe_source
     assert "ToBase64String" in probe_source
     assert "device_id =" not in probe_source
@@ -102,14 +153,81 @@ def test_node_mqtt_auth_probe_runs_after_compose_and_before_firmware_upload():
     param_block = probe_source.split("param(", 1)[1].split("\n)", 1)[0]
     assert "$PSScriptRoot" not in param_block
     assert "[string]::IsNullOrWhiteSpace($ProjectRoot)" in probe_source
-    probe_call = next(
-        line for line in source.splitlines() if "Test-NodeMqttCredential.ps1" in line
-    )
+    probe_call = next(line for line in source.splitlines() if "Test-NodeMqttCredential.ps1" in line)
     assert "-ProjectRoot" not in probe_call
-    assert 'if "%NODE_AUTH_RC%"=="16"' in source
-    assert "Credential hoac MQTT_USERNAME/DEVICE_ID" in source
-    assert "Rotate-LocalNodeMqttCredential.ps1" in source
-    assert "SIMULATOR_MQTT_PASSWORD=([^\\r\\n]*)" in source
+    assert "Credential/ACL firmware khong khop Mosquitto" in source
+    assert "SIMULATOR_MQTT_PASSWORD" in source
+
+
+@pytest.mark.parametrize(("filename", "action"), WRAPPERS.items())
+def test_bat_wrappers_are_thin_portable_and_preserve_exit_code(filename, action):
+    source = (ROOT / filename).read_text(encoding="utf-8")
+
+    assert "%~dp0IOT-HEALTH-EDGE.ps1" in source
+    assert f"-Action {action}" in source
+    assert 'if /i "%~1"=="--no-pause"' in source
+    assert 'set "FINAL_CODE=%ERRORLEVEL%"' in source
+    assert "exit /b %FINAL_CODE%" in source
+    assert "FORWARD_ARGS" in source
+    assert "%NO_PAUSE_ARG% %FORWARD_ARGS%" in source
+    assert "docker compose" not in source.lower()
+    assert "--target upload" not in source.lower()
+
+
+def test_software_action_has_no_firmware_or_serial_side_effects():
+    source = LAUNCHER.read_text(encoding="utf-8")
+    software_config = _function_source(
+        source, "Assert-SoftwareConfiguration", "Get-SingleDefineValue"
+    )
+    software_start = _function_source(source, "Start-SoftwareStack", "Get-PythonLauncher")
+    software_path = software_config + software_start
+
+    for forbidden in (
+        "SecretsFile",
+        "Get-Ch340Port",
+        "Get-PlatformIoCommand",
+        "Test-NodeMqttCredential",
+        "--target",
+        "upload",
+    ):
+        assert forbidden not in software_path
+
+
+def test_install_stop_and_logs_are_non_destructive_and_bounded():
+    source = LAUNCHER.read_text(encoding="utf-8")
+    compose_helper = _function_source(
+        source, "Get-ComposeBaseArguments", "Assert-DockerReady"
+    )
+    install = _function_source(source, "Install-System", "Get-PlatformIoCommand")
+    stop = _function_source(source, "Stop-System", "Show-SystemStatus")
+    logs = _function_source(source, "Show-SystemLogs", "try {")
+
+    assert "-not (Test-Path -LiteralPath $script:EnvFile)" in install
+    assert "-not (Test-Path -LiteralPath $script:SecretsFile)" in install
+    assert "-Force" not in install
+    assert "Invoke-NativeQuiet -FilePath $pioPython" in install
+    assert "'pip', 'install', 'platformio'" in install
+    assert "@('down')" in stop
+    assert "--volumes" not in stop
+    assert "Get-ComposeBaseArguments -UseEmptyEnv" in logs
+    assert "@('--env-file', 'NUL')" in compose_helper
+    assert "'--since', $Since, '--tail', $Tail.ToString()" in logs
+    assert "'mosquitto', 'edge'" in logs
+    assert "inspect" not in logs.lower()
+
+
+def test_hardware_auth_errors_are_classified_and_legacy_mode_keeps_old_no_com_path():
+    source = LAUNCHER.read_text(encoding="utf-8")
+    hardware = _function_source(source, "Start-HardwareStack", "Stop-System")
+    dispatch = source.split("switch ($Action)", 1)[1]
+
+    assert "$authExitCode -eq 16" in hardware
+    assert "$authExitCode -eq 17" in hardware
+    assert "MQTT auth probe khong hoan tat (exit 17)" in hardware
+    assert "MQTT auth probe gap loi noi bo" in hardware
+    assert "Get-Process -Name 'serial-monitor'" not in hardware
+    assert "Start-SoftwareStack -OpenDashboard" in hardware
+    assert "'StartLegacy' { Start-HardwareStack -AllowMissingHardware }" in dispatch
 
 
 @pytest.mark.parametrize(
