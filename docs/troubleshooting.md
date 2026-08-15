@@ -1,5 +1,16 @@
 # Khắc phục sự cố
 
+## Chọn đúng launcher
+
+- Chỉ cần MQTT/API/dashboard: `START-SOFTWARE.bat`.
+- Chủ động nạp NodeMCU và xác minh telemetry mới: `START-HARDWARE.bat`.
+- Kiểm tra nhanh: `STATUS-IOT-HEALTH-EDGE.bat`.
+- Log giới hạn 10 phút/200 dòng: `LOGS-IOT-HEALTH-EDGE.bat`.
+- Dừng nhưng giữ dữ liệu: `STOP-IOT-HEALTH-EDGE.bat`.
+- Tên cũ `START-IOT-HEALTH-EDGE.bat` giữ hành vi cũ: thiếu CH340 thì vẫn mở
+  software và bỏ qua upload. Không dùng tên này khi muốn bắt buộc có board;
+  hãy dùng `START-HARDWARE.bat`.
+
 ## Broker/Docker
 
 ### Container thoát ngay, báo thiếu password/ACL
@@ -38,7 +49,7 @@ Không tạo tệp password rỗng thủ công. Nếu chủ động tạo lại 
 
   ```powershell
   powershell -ExecutionPolicy Bypass -File .\deploy\scripts\Sync-FirmwareMqttCredential.ps1
-  .\START-IOT-HEALTH-EDGE.bat
+  .\START-HARDWARE.bat
   ```
 
   Script chỉ sửa `MQTT_USERNAME`/`MQTT_PASSWORD` trong `secrets.h`, không in
@@ -71,7 +82,7 @@ Không tạo tệp password rỗng thủ công. Nếu chủ động tạo lại 
   NodeMCU với `MQTT_HOST` trong
   `firmware\health-node\include\secrets.h`. IP hotspot/router có thể đổi sau
   khi kết nối lại.
-- Chạy `START-IOT-HEALTH-EDGE.bat`. Trong workflow broker local, launcher dừng
+- Chạy `START-HARDWARE.bat`. Trong workflow broker local, launcher dừng
   trước Docker/upload nếu `MQTT_HOST` không khớp bất kỳ IPv4 non-loopback đang
   hoạt động nào trên laptop. Gate này không in SSID hoặc mật khẩu.
 - Sau khi sửa `secrets.h`, phải build và nạp lại firmware; chỉ sửa file không

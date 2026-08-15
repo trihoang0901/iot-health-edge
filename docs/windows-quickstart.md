@@ -1,5 +1,44 @@
 # Quickstart trên Windows
 
+## Cách khuyến nghị: launcher tách theo nhiệm vụ
+
+Từ thư mục dự án, chạy một lần:
+
+```powershell
+.\INSTALL-IOT-HEALTH-EDGE.bat
+```
+
+Installer kiểm tra Docker/Python, chuẩn bị `.venv` và PlatformIO cục bộ, chỉ
+tạo `.env`/`secrets.h` khi chưa có, đồng thời khởi tạo Mosquitto theo kiểu nhập
+mật khẩu tương tác khi chưa có credential. Nó không ghi đè file hoặc mật khẩu
+hiện hữu. Installer không tự cài Docker Desktop, Python hoặc driver USB/CH340.
+Sau đó mở `.env` và `secrets.h` để thay các giá trị mẫu; không gửi nội dung hai
+file này qua chat hoặc ảnh chụp.
+
+Vận hành hằng ngày:
+
+```powershell
+.\START-SOFTWARE.bat
+.\STATUS-IOT-HEALTH-EDGE.bat
+.\LOGS-IOT-HEALTH-EDGE.bat
+.\STOP-IOT-HEALTH-EDGE.bat
+```
+
+`START-SOFTWARE.bat` không đọc cấu hình firmware, không dò CH340/PlatformIO và
+không upload. Khi đã cắm NodeMCU và chủ động muốn build/upload, dùng:
+
+```powershell
+.\START-HARDWARE.bat
+```
+
+Tên cũ `START-IOT-HEALTH-EDGE.bat` vẫn giữ hành vi tương thích: nếu không thấy
+CH340 thì khởi động software và bỏ qua upload. File mới
+`START-HARDWARE.bat` fail-closed khi thiếu board/PlatformIO. Mỗi wrapper nhận
+`--no-pause` ở bất kỳ vị trí nào; logs còn nhận `-Tail` và `-Since`, ví dụ
+`.\LOGS-IOT-HEALTH-EDGE.bat -Tail 50 -Since 5m --no-pause`. Action logs chỉ đọc
+hai service `edge`/`mosquitto` trong cửa sổ giới hạn và không nạp `.env`. Các
+phần bên dưới là quy trình thủ công để hiểu hoặc xử lý từng thành phần.
+
 ## 1. Chuẩn bị
 
 - Docker Desktop ở trạng thái Running.
@@ -137,14 +176,16 @@ Ngưỡng demo có khoảng giữ mặc định nên `low_spo2`/`high_hr` cần 
 6. Với broker local trên laptop, chạy launcher một chạm:
 
    ```powershell
-   .\START-IOT-HEALTH-EDGE.bat
+   .\START-HARDWARE.bat
    ```
 
-   Launcher kiểm tra bí mật theo trạng thái (không in giá trị), yêu cầu
+   `START-IOT-HEALTH-EDGE.bat` là tên tương thích có thêm nhánh bỏ qua upload
+   khi thiếu CH340. Launcher hardware kiểm tra bí mật theo trạng thái (không in
+   giá trị), yêu cầu
    `MQTT_HOST` là một IPv4 non-loopback đang hoạt động trên laptop, khởi động
    Docker, tự tìm CH340 và nạp firmware nếu có NodeMCU. Nếu báo
    `MQTT_HOST ... khong khop`, cập nhật IP trong `secrets.h` rồi chạy lại;
-   launcher dừng trước khi nạp firmware cũ.
+   launcher dừng trước khi upload.
 7. Nếu nạp thủ công, chạy trong `firmware\health-node`:
 
    ```powershell
@@ -207,9 +248,10 @@ Không cần buzzer hoặc nút để hoàn thành MVP. Nếu thêm về sau, ch
 ## 7. Dừng dịch vụ
 
 ```powershell
-docker compose -f .\deploy\docker-compose.yml --profile full down
+.\STOP-IOT-HEALTH-EDGE.bat
 ```
 
-Lệnh trên giữ các Docker volume `mosquitto-data` và `edge-data`. Chỉ thêm
+Lệnh trên gọi Compose `down` và giữ các Docker volume `mosquitto-data` và
+`edge-data`. Chỉ thêm
 `--volumes` khi chủ động muốn mất toàn bộ dữ liệu Mosquitto và SQLite; không
 cần làm trong vận hành bình thường.

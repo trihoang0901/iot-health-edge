@@ -11,6 +11,15 @@ Broker:
 Từ PowerShell tại thư mục gốc dự án:
 
 ```powershell
+.\INSTALL-IOT-HEALTH-EDGE.bat
+.\START-SOFTWARE.bat
+```
+
+Đây là đường khuyến nghị trên Windows. Installer không ghi đè cấu hình hoặc
+credential hiện hữu; software launcher không thể upload firmware. Các lệnh
+Compose thủ công tương đương nằm bên dưới.
+
+```powershell
 powershell -ExecutionPolicy Bypass -File .\deploy\scripts\Initialize-Mosquitto.ps1
 docker compose -f .\deploy\docker-compose.yml up -d
 docker compose -f .\deploy\docker-compose.yml logs -f mosquitto
@@ -39,9 +48,16 @@ volume `edge-data`; khởi động lại container không xóa dữ liệu. Heal
 Xem log hoặc dừng profile:
 
 ```powershell
+.\LOGS-IOT-HEALTH-EDGE.bat
+.\STOP-IOT-HEALTH-EDGE.bat
+
+# Hoặc dùng Compose trực tiếp:
 docker compose --env-file .\.env -f .\deploy\docker-compose.yml --profile full logs -f edge
 docker compose --env-file .\.env -f .\deploy\docker-compose.yml --profile full down
 ```
+
+Wrapper logs mặc định chỉ trả tối đa 200 dòng của `edge`/`mosquitto` trong 10
+phút gần nhất và không nạp `.env`; có thể đổi cửa sổ bằng `-Tail`/`-Since`.
 
 Lệnh `down` giữ cả `mosquitto-data` và `edge-data`. Không thêm `--volumes` trừ
 khi chủ động muốn xóa dữ liệu đã lưu.

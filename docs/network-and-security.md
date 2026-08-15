@@ -105,11 +105,23 @@ pháp Alternate-Marking của RFC này.
    DHCP reservation/DNS nội bộ phù hợp.
 7. Xác nhận hotspot có SSID 2,4 GHz mà ESP8266 nhìn thấy; không nhầm 5G di động với Wi-Fi 5 GHz.
 
-Trong workflow broker local, `START-IOT-HEALTH-EDGE.bat` fail-closed nếu
+Trong workflow broker local, `START-HARDWARE.bat` và launcher tương thích
+`START-IOT-HEALTH-EDGE.bat` đều fail-closed về cấu hình nếu
 `MQTT_HOST` không phải IPv4 non-loopback đang hoạt động trên laptop. Gate này
 chạy trước Docker/upload và chỉ báo trạng thái, không in credential. Nó cố ý
 không áp dụng cho broker đầu xa; triển khai remote phải dùng quy trình riêng và
 đáp ứng yêu cầu TLS/VPN bên dưới, không vô hiệu hóa gate bằng một địa chỉ giả.
+
+Khác biệt duy nhất khi không phát hiện CH340: tên tương thích vẫn khởi động
+software và skip upload như trước đây; `START-HARDWARE.bat` mới dừng với lỗi để
+người vận hành không tưởng rằng board đã được nạp.
+
+`START-SOFTWARE.bat` là đường vận hành dashboard an toàn: action này không đọc
+`secrets.h`, không dò cổng COM và không gọi PlatformIO/upload.
+
+`LOGS-IOT-HEALTH-EDGE.bat` dùng một env file rỗng tường minh để Compose không
+tự nạp `.env`; wrapper chỉ lấy log giới hạn của `edge` và `mosquitto`. Dù vậy,
+không ghi secret vào message log và không chia sẻ log chưa rà soát.
 
 ## Mô hình bảo mật MVP
 

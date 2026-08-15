@@ -79,6 +79,34 @@ Yêu cầu: Docker Desktop đang chạy. Python 3.11+ chỉ cần cho simulator 
 chọn chạy edge trực tiếp. Để chạy local, test, artifact runner và browser smoke,
 cài dependency khóa của project:
 
+### Bộ launcher Windows khuyến nghị
+
+Lần đầu tiên, chạy installer rồi điền các file cấu hình mẫu mà installer tạo.
+Installer giữ nguyên `.env`, `secrets.h` và credential Mosquitto nếu đã tồn tại.
+Nó chỉ kiểm tra Docker Desktop/Python, không tự cài các công cụ này hoặc driver USB/CH340:
+
+```powershell
+.\INSTALL-IOT-HEALTH-EDGE.bat
+```
+
+Các lần sau, chọn đúng thao tác thay vì dùng một launcher làm mọi việc:
+
+```powershell
+.\START-SOFTWARE.bat          # Docker + MQTT + edge + dashboard, không upload
+.\START-HARDWARE.bat          # kiểm tra, upload NodeMCU, xác minh telemetry mới
+.\STATUS-IOT-HEALTH-EDGE.bat  # trạng thái container/API/MQTT
+.\LOGS-IOT-HEALTH-EDGE.bat    # edge/mosquitto, tối đa 200 dòng trong 10 phút
+.\STOP-IOT-HEALTH-EDGE.bat    # dừng nhưng giữ Docker volumes
+```
+
+`START-IOT-HEALTH-EDGE.bat` giữ hành vi cũ: nếu không thấy CH340, nó vẫn khởi
+động software và bỏ qua upload. `START-HARDWARE.bat` mới fail-closed khi thiếu
+board/PlatformIO. Khi chỉ muốn mở dashboard, gọi thẳng `START-SOFTWARE.bat`.
+Toàn bộ wrapper gọi lõi `IOT-HEALTH-EDGE.ps1`; có thể đặt `--no-pause` ở bất kỳ vị trí nào.
+Riêng logs nhận thêm `-Tail 50 -Since 5m` và không nạp `.env` chỉ để đọc log.
+
+### Cài thủ công
+
 ```powershell
 python -m pip install -e ".[test,artifact]"
 pnpm install --frozen-lockfile
@@ -173,7 +201,8 @@ phi lâm sàng, không phải hệ thống cấp cứu.
 3. Cho phép TCP 1883 trên Windows Firewall **chỉ với mạng Private**.
 4. Điền Wi-Fi, IPv4 broker hiện tại và tài khoản node vào
    `firmware/health-node/include/secrets.h`. Nếu dùng broker trên laptop, có thể
-   chạy `START-IOT-HEALTH-EDGE.bat`; launcher sẽ dừng trước khi nạp nếu
+   chạy `START-HARDWARE.bat` (hoặc tên tương thích
+   `START-IOT-HEALTH-EDGE.bat`); launcher sẽ dừng trước khi nạp nếu
    `MQTT_HOST` không khớp một IPv4 cục bộ đang hoạt động.
 5. Xem Serial Monitor trước, sau đó kiểm tra dashboard và [checklist](docs/test-checklist.md).
 
