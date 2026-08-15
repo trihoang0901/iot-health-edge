@@ -5,10 +5,17 @@ from datetime import UTC, datetime, timedelta
 from edge.config import DemoRuleSettings
 from edge.db import Database
 from edge.rules import RuleEngine
-from edge.schemas import Telemetry, TelemetryV2, TelemetryV3
+from edge.schemas import Telemetry, TelemetryV2, TelemetryV3, TelemetryV4
 
 
-def build_engine(tmp_path, *, hold=5.0, fall_recovery=5.0, max_sample_gap=3.0):
+def build_engine(
+    tmp_path,
+    *,
+    hold=5.0,
+    recovery=0.0,
+    fall_recovery=5.0,
+    max_sample_gap=3.0,
+):
     database = Database(tmp_path / "rules.db")
     database.initialize()
     engine = RuleEngine(
@@ -17,6 +24,7 @@ def build_engine(tmp_path, *, hold=5.0, fall_recovery=5.0, max_sample_gap=3.0):
             low_spo2_threshold=92.0,
             high_hr_threshold=120.0,
             hold_seconds=hold,
+            recovery_seconds=recovery,
             spo2_hysteresis=2.0,
             hr_hysteresis=5.0,
             min_ppg_quality=0.5,
@@ -33,6 +41,11 @@ def test_public_rules_do_not_advertise_retired_surface_temperature(tmp_path):
     rule_ids = {rule["rule_id"] for rule in engine.public_rules()}
 
     assert rule_ids == {"demo_low_spo2", "demo_high_hr", "fall_suspected_demo"}
+    assert {
+        rule["recovery_seconds"]
+        for rule in engine.public_rules()
+        if rule["rule_id"] != "fall_suspected_demo"
+    } == {0.0}
 
 
 def test_v2_environment_never_opens_a_threshold_alert(
@@ -73,6 +86,11 @@ def test_v3_wrist_surface_temperature_never_opens_a_threshold_alert(
 def telemetry_from(payload, **vitals):
     copied = {**payload, "vitals": {**payload["vitals"], **vitals}}
     return Telemetry.model_validate(copied)
+
+
+def telemetry_v4_from(payload, **vitals):
+    copied = {**payload, "vitals": {**payload["vitals"], **vitals}}
+    return TelemetryV4.model_validate(copied)
 
 
 def test_rule_requires_hold_duration_and_deduplicates(tmp_path, valid_telemetry_payload):
@@ -154,6 +172,113 @@ def test_hysteresis_prevents_alert_flapping(tmp_path, valid_telemetry_payload):
     )
     assert database.list_alerts(state="active") == []
     assert database.list_alerts(state="resolved")[0]["rule_id"] == "demo_low_spo2"
+
+
+def test_v4_rules_use_confirmed_values_not_raw_values(
+    tmp_path, valid_telemetry_v4_payload
+):
+    database, engine = build_engine(tmp_path, hold=0.0)
+    now = datetime(2026, 8, 14, 12, 0, tzinfo=UTC)
+    database.ensure_device("health-node-01", "boot-0004", now)
+
+    raw_only_spike = telemetry_v4_from(
+        valid_telemetry_v4_payload,
+        heart_rate_raw_bpm=180.0,
+        heart_rate_bpm=76.0,
+        spo2_raw_pct=88.0,
+        spo2_pct=97.0,
+    )
+    engine.evaluate(raw_only_spike, now)
+    assert database.list_alerts(state="active") == []
+
+    confirmed_spike = telemetry_v4_from(
+        valid_telemetry_v4_payload,
+        heart_rate_raw_bpm=180.0,
+        heart_rate_bpm=180.0,
+    )
+    engine.evaluate(confirmed_spike, now + timedelta(seconds=1))
+    alerts = database.list_alerts(state="active")
+    assert len(alerts) == 1
+    assert alerts[0]["rule_id"] == "demo_high_hr"
+
+
+def test_vital_alert_requires_continuous_recovery_hold(
+    tmp_path, valid_telemetry_payload
+):
+    database, engine = build_engine(
+        tmp_path,
+        hold=0.0,
+        recovery=5.0,
+        max_sample_gap=3.0,
+    )
+    start = datetime(2026, 8, 14, 12, 0, tzinfo=UTC)
+    database.ensure_device("health-node-01", "boot-0001", start)
+    low = telemetry_from(valid_telemetry_payload, spo2_pct=90.0)
+    recovered = telemetry_from(valid_telemetry_payload, spo2_pct=95.0)
+
+    engine.evaluate(low, start)
+    for seconds in (1, 3):
+        engine.evaluate(recovered, start + timedelta(seconds=seconds))
+        assert len(database.list_alerts(state="active")) == 1
+
+    engine.evaluate(recovered, start + timedelta(seconds=6))
+    assert database.list_alerts(state="active") == []
+    assert database.list_alerts(state="resolved")[0]["rule_id"] == "demo_low_spo2"
+
+
+def test_invalid_sample_does_not_resolve_and_resets_vital_recovery_hold(
+    tmp_path, valid_telemetry_payload, clone_payload
+):
+    database, engine = build_engine(
+        tmp_path,
+        hold=0.0,
+        recovery=5.0,
+        max_sample_gap=3.0,
+    )
+    start = datetime(2026, 8, 14, 12, 0, tzinfo=UTC)
+    database.ensure_device("health-node-01", "boot-0001", start)
+    low = telemetry_from(valid_telemetry_payload, spo2_pct=90.0)
+    recovered = telemetry_from(valid_telemetry_payload, spo2_pct=95.0)
+    invalid_payload = clone_payload()
+    invalid_payload["vitals"]["spo2_pct"] = None
+    invalid_payload["quality"]["spo2_valid"] = False
+    invalid = Telemetry.model_validate(invalid_payload)
+
+    engine.evaluate(low, start)
+    engine.evaluate(recovered, start + timedelta(seconds=1))
+    engine.evaluate(invalid, start + timedelta(seconds=2))
+    assert len(database.list_alerts(state="active")) == 1
+
+    for seconds in (3, 6):
+        engine.evaluate(recovered, start + timedelta(seconds=seconds))
+    assert len(database.list_alerts(state="active")) == 1
+
+    engine.evaluate(recovered, start + timedelta(seconds=8))
+    assert database.list_alerts(state="active") == []
+
+
+def test_vital_recovery_hold_resets_after_sample_gap(
+    tmp_path, valid_telemetry_payload
+):
+    database, engine = build_engine(
+        tmp_path,
+        hold=0.0,
+        recovery=5.0,
+        max_sample_gap=3.0,
+    )
+    start = datetime(2026, 8, 14, 12, 0, tzinfo=UTC)
+    database.ensure_device("health-node-01", "boot-0001", start)
+    low = telemetry_from(valid_telemetry_payload, spo2_pct=90.0)
+    recovered = telemetry_from(valid_telemetry_payload, spo2_pct=95.0)
+
+    engine.evaluate(low, start)
+    engine.evaluate(recovered, start + timedelta(seconds=1))
+    engine.evaluate(recovered, start + timedelta(seconds=5))
+    engine.evaluate(recovered, start + timedelta(seconds=8))
+    assert len(database.list_alerts(state="active")) == 1
+
+    engine.evaluate(recovered, start + timedelta(seconds=10))
+    assert database.list_alerts(state="active") == []
 
 
 def test_invalid_quality_suppresses_rule(tmp_path, clone_payload):

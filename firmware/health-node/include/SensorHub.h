@@ -8,6 +8,7 @@
 #include "Ds18b20Schedule.h"
 #include "Model.h"
 #include "Mpu6Axis.h"
+#include "PpgQualityGate.h"
 
 class SensorHub {
  public:
@@ -24,7 +25,6 @@ class SensorHub {
   static constexpr size_t kPpgWindowSamples = 100;
 
   static uint32_t elapsed(uint32_t nowMs, uint32_t sinceMs);
-  static float clamp01(float value);
   void setFault(SensorFault fault, bool active);
   void recoverI2cBus(uint32_t nowMs);
 
@@ -38,7 +38,7 @@ class SensorHub {
   void tickMax30102(uint32_t nowMs);
   void addPpgSample(uint32_t red, uint32_t ir, uint32_t nowMs);
   void processPpgWindow(uint32_t nowMs);
-  void invalidatePpg(bool fingerPresent);
+  void invalidatePpg(bool fingerPresent, const char* state);
   void resetPpgWindow();
 
   void tickImu(uint32_t nowMs);
@@ -69,6 +69,7 @@ class SensorHub {
   uint32_t lastPpgProcessMs_ = 0;
   uint32_t lastPpgTickMs_ = 0;
   bool fingerPresent_ = false;
+  PpgQualityGate ppgQualityGate_;
 
   uint32_t lastImuSampleMs_ = 0;
   FallSample pendingMotionSample_;

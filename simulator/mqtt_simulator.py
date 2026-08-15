@@ -19,6 +19,7 @@ SCENARIOS = (
     "normal",
     "ds18b20_fault",
     "motion_artifact",
+    "unstable_ppg",
     "low_spo2",
     "high_hr",
     "fall",
@@ -26,7 +27,7 @@ SCENARIOS = (
 )
 DEVICE_ID_RE = re.compile(r"^[a-z0-9][a-z0-9-]{0,31}$")
 UINT32_MAX = 4_294_967_295
-SIMULATOR_FW = "simulator-1.2.0"
+SIMULATOR_FW = "simulator-1.3.0"
 
 
 @dataclass(frozen=True, slots=True)
@@ -108,6 +109,8 @@ class ScenarioStream:
         jitter = self.random.uniform(-1.0, 1.0)
         heart_rate: float | None = round(72.0 + (jitter * 2.0), 1)
         spo2: float | None = round(98.0 + (jitter * 0.3), 1)
+        heart_rate_raw: float | None = heart_rate
+        spo2_raw: float | None = spo2
         wrist_surface_temp: float | None = round(33.0 + (jitter * 0.4), 1)
         accel: float | None = round(1.0 + (jitter * 0.03), 3)
         gyro: float | None = round(abs(jitter) * 3.0, 2)
@@ -115,6 +118,7 @@ class ScenarioStream:
         ppg: float | None = 0.94
         finger_present = True
         motion_artifact = False
+        ppg_state = "valid"
         heart_rate_valid = True
         spo2_valid = True
         wrist_surface_temp_valid = True
@@ -132,13 +136,25 @@ class ScenarioStream:
             gyro = round(120.0 + abs(jitter) * 60.0, 2)
             ppg = 0.18
             motion_artifact = True
+            ppg_state = "motion"
             heart_rate_valid = False
             spo2_valid = False
             faults = ["ppg_motion_artifact"]
+        elif scenario == "unstable_ppg":
+            heart_rate_raw = 180.0 if step % 2 == 0 else 66.0
+            spo2_raw = 96.0 if step % 2 == 0 else 99.0
+            heart_rate = None
+            spo2 = None
+            ppg = 0.58
+            ppg_state = "unstable"
+            heart_rate_valid = False
+            spo2_valid = False
         elif scenario == "low_spo2":
             spo2 = round(88.5 + (jitter * 0.4), 1)
+            spo2_raw = spo2
         elif scenario == "high_hr":
             heart_rate = round(136.0 + (jitter * 3.0), 1)
+            heart_rate_raw = heart_rate
         elif scenario == "fall":
             trigger = 3 if total is None else max(0, total // 2)
             phase = step - trigger
@@ -162,6 +178,7 @@ class ScenarioStream:
                 fall_state = "alarm"
                 ppg = 0.12
                 motion_artifact = True
+                ppg_state = "motion"
                 heart_rate_valid = False
                 spo2_valid = False
                 faults = ["fall_suspected_demo", "ppg_motion_artifact"]
@@ -172,6 +189,7 @@ class ScenarioStream:
                 spo2 = None
                 ppg = 0.2
                 motion_artifact = True
+                ppg_state = "motion"
                 heart_rate_valid = False
                 spo2_valid = False
                 faults = [f"fall_phase_{fall_state}", "ppg_motion_artifact"]
@@ -179,13 +197,15 @@ class ScenarioStream:
         return Message(
             topic=self.topic("telemetry"),
             payload={
-                "schema": "health.telemetry.v3",
+                "schema": "health.telemetry.v4",
                 "device_id": self.config.device_id,
                 "boot_id": self.boot_id,
                 "seq": self.seq,
                 "uptime_ms": self.uptime_ms(step if self.config.dry_run else None),
                 "vitals": {
+                    "heart_rate_raw_bpm": heart_rate_raw,
                     "heart_rate_bpm": heart_rate,
+                    "spo2_raw_pct": spo2_raw,
                     "spo2_pct": spo2,
                 },
                 "wearable": {
@@ -200,6 +220,7 @@ class ScenarioStream:
                     "ppg": ppg,
                     "finger_present": finger_present,
                     "motion_artifact": motion_artifact,
+                    "ppg_state": ppg_state,
                     "heart_rate_valid": heart_rate_valid,
                     "spo2_valid": spo2_valid,
                     "wrist_surface_temp_valid": wrist_surface_temp_valid,

@@ -37,16 +37,6 @@ uint32_t SensorHub::elapsed(uint32_t nowMs, uint32_t sinceMs) {
   return static_cast<uint32_t>(nowMs - sinceMs);
 }
 
-float SensorHub::clamp01(float value) {
-  if (value < 0.0F) {
-    return 0.0F;
-  }
-  if (value > 1.0F) {
-    return 1.0F;
-  }
-  return value;
-}
-
 void SensorHub::setFault(SensorFault fault, bool active) {
   if (active) {
     snapshot_.faultMask |= static_cast<uint8_t>(fault);
@@ -89,7 +79,7 @@ bool SensorHub::initializeMax30102(uint32_t nowMs) {
   Wire.setClockStretchLimit(config::kI2cClockStretchLimitUs);
   setFault(kFaultMax30102, !maxReady_);
   resetPpgWindow();
-  invalidatePpg(false);
+  invalidatePpg(false, "no_finger");
   lastPpgSampleMs_ = nowMs;
   lastPpgProcessMs_ = nowMs;
   lastPpgTickMs_ = nowMs;
@@ -234,7 +224,7 @@ void SensorHub::tickMax30102(uint32_t nowMs) {
   if (samplingGap) {
     max30102_.clearFIFO();
     resetPpgWindow();
-    invalidatePpg(fingerPresent_);
+    invalidatePpg(fingerPresent_, "sample_loss");
     setFault(kFaultPpgOverflow, true);
     lastPpgSampleMs_ = nowMs;
     return;
@@ -246,7 +236,7 @@ void SensorHub::tickMax30102(uint32_t nowMs) {
       max30102_.nextSample();
     }
     resetPpgWindow();
-    invalidatePpg(fingerPresent_);
+    invalidatePpg(fingerPresent_, "sample_loss");
     setFault(kFaultPpgOverflow, true);
     lastPpgSampleMs_ = nowMs;
     return;
@@ -262,7 +252,7 @@ void SensorHub::tickMax30102(uint32_t nowMs) {
   if (elapsed(nowMs, lastPpgSampleMs_) > config::kPpgStaleMs) {
     maxReady_ = false;
     setFault(kFaultMax30102, true);
-    invalidatePpg(false);
+    invalidatePpg(false, "sample_loss");
     maxRetryMs_ = nowMs;
     return;
   }
@@ -282,7 +272,7 @@ void SensorHub::addPpgSample(uint32_t red, uint32_t ir, uint32_t nowMs) {
       resetPpgWindow();
     }
     fingerPresent_ = false;
-    invalidatePpg(false);
+    invalidatePpg(false, "no_finger");
     return;
   }
 
@@ -307,8 +297,11 @@ void SensorHub::addPpgSample(uint32_t red, uint32_t ir, uint32_t nowMs) {
   }
 
   if (ppgCount_ < kPpgWindowSamples) {
+    snapshot_.heartRateRawBpm.valid = false;
+    snapshot_.spo2RawPct.valid = false;
     snapshot_.heartRateBpm.valid = false;
     snapshot_.spo2Pct.valid = false;
+    snapshot_.ppgState = "warming_up";
     snapshot_.ppgQuality = 0.4F *
                            (static_cast<float>(ppgCount_) /
                             static_cast<float>(kPpgWindowSamples));
@@ -317,9 +310,6 @@ void SensorHub::addPpgSample(uint32_t red, uint32_t ir, uint32_t nowMs) {
 
 void SensorHub::processPpgWindow(uint32_t nowMs) {
   lastPpgProcessMs_ = nowMs;
-  uint64_t irSum = 0;
-  uint32_t irMin = UINT32_MAX;
-  uint32_t irMax = 0;
   size_t motionSamples = 0;
   size_t motionValidSamples = 0;
 
@@ -327,13 +317,6 @@ void SensorHub::processPpgWindow(uint32_t nowMs) {
     const size_t ringIndex = (ppgWriteIndex_ + index) % kPpgWindowSamples;
     redWork_[index] = redRing_[ringIndex];
     irWork_[index] = irRing_[ringIndex];
-    irSum += irWork_[index];
-    if (irWork_[index] < irMin) {
-      irMin = irWork_[index];
-    }
-    if (irWork_[index] > irMax) {
-      irMax = irWork_[index];
-    }
     motionSamples += motionRing_[ringIndex] != 0U ? 1U : 0U;
     motionValidSamples += motionValidityRing_[ringIndex] != 0U ? 1U : 0U;
   }
@@ -348,41 +331,45 @@ void SensorHub::processPpgWindow(uint32_t nowMs) {
 
   const bool motionArtifact = motionSamples > (kPpgWindowSamples / 10U);
   const bool motionCoverageValid = motionValidSamples == kPpgWindowSamples;
-  const bool hrPlausible = heartRate >= 40 && heartRate <= 220;
-  const bool spo2Plausible = spo2 >= 50 && spo2 <= 100;
   snapshot_.motionArtifact = motionArtifact;
-  snapshot_.heartRateBpm.valid =
-      heartRateValid != 0 && hrPlausible && !motionArtifact && motionCoverageValid &&
-      snapshot_.motionValid;
-  snapshot_.spo2Pct.valid =
-      spo2Valid != 0 && spo2Plausible && !motionArtifact && motionCoverageValid &&
-      snapshot_.motionValid;
-  snapshot_.heartRateBpm.value = static_cast<float>(heartRate);
-  snapshot_.spo2Pct.value = static_cast<float>(spo2);
 
-  const float meanIr = static_cast<float>(irSum) / static_cast<float>(kPpgWindowSamples);
-  const float relativePulse = meanIr > 0.0F
-                                  ? static_cast<float>(irMax - irMin) / meanIr
-                                  : 0.0F;
-  const float pulsatilityScore = clamp01((relativePulse - 0.001F) / 0.020F);
-  const float algorithmScore =
-      (snapshot_.heartRateBpm.valid && snapshot_.spo2Pct.valid) ? 1.0F : 0.4F;
-  float quality = 0.4F + 0.4F * pulsatilityScore + 0.2F * algorithmScore;
-  if (motionArtifact) {
-    quality *= 0.35F;
-  }
-  if (!motionCoverageValid) {
-    quality *= 0.35F;
-  }
-  snapshot_.ppgQuality = clamp01(quality);
+  PpgGateInput gateInput;
+  gateInput.redSamples = redWork_;
+  gateInput.irSamples = irWork_;
+  gateInput.sampleCount = kPpgWindowSamples;
+  gateInput.sampleRateHz = config::kPpgEffectiveSampleRateHz;
+  gateInput.fingerPresent = fingerPresent_;
+  gateInput.motionArtifact = motionArtifact;
+  gateInput.motionCoverageValid = motionCoverageValid && snapshot_.motionValid;
+  gateInput.sampleLoss = false;
+  gateInput.heartRateCandidateBpm = static_cast<float>(heartRate);
+  gateInput.heartRateCandidateValid = heartRateValid != 0;
+  gateInput.spo2CandidatePct = static_cast<float>(spo2);
+  gateInput.spo2CandidateValid = spo2Valid != 0;
+  const PpgGateResult gateResult = ppgQualityGate_.evaluate(gateInput);
+
+  snapshot_.heartRateRawBpm.value = gateResult.rawHeartRateBpm;
+  snapshot_.heartRateRawBpm.valid = gateResult.rawHeartRateValid;
+  snapshot_.spo2RawPct.value = gateResult.rawSpo2Pct;
+  snapshot_.spo2RawPct.valid = gateResult.rawSpo2Valid;
+  snapshot_.heartRateBpm.value = gateResult.confirmedHeartRateBpm;
+  snapshot_.heartRateBpm.valid = gateResult.confirmedHeartRateValid;
+  snapshot_.spo2Pct.value = gateResult.confirmedSpo2Pct;
+  snapshot_.spo2Pct.valid = gateResult.confirmedSpo2Valid;
+  snapshot_.ppgQuality = gateResult.ppgQuality;
+  snapshot_.ppgState = gateResult.state;
   setFault(kFaultPpgOverflow, false);
 }
 
-void SensorHub::invalidatePpg(bool fingerPresent) {
+void SensorHub::invalidatePpg(bool fingerPresent, const char* state) {
+  ppgQualityGate_.reset();
   snapshot_.fingerPresent = fingerPresent;
   snapshot_.motionArtifact = false;
+  snapshot_.heartRateRawBpm.valid = false;
+  snapshot_.spo2RawPct.valid = false;
   snapshot_.heartRateBpm.valid = false;
   snapshot_.spo2Pct.valid = false;
+  snapshot_.ppgState = state;
   snapshot_.ppgQuality = fingerPresent ? snapshot_.ppgQuality : 0.0F;
 }
 
@@ -431,7 +418,7 @@ void SensorHub::invalidateImu(uint32_t nowMs) {
   snapshot_.motionValid = false;
   setFault(kFaultMpu6050, true);
   resetPpgWindow();
-  invalidatePpg(fingerPresent_);
+  invalidatePpg(fingerPresent_, fingerPresent_ ? "motion" : "no_finger");
 
   // Deliver an invalid sample immediately so an in-progress fall candidate is
   // cancelled on this loop rather than surviving until the sample-gap timeout.

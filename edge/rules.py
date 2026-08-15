@@ -15,6 +15,7 @@ class DemoRule:
     direction: str
     threshold: float
     hold_seconds: float
+    recovery_seconds: float
     hysteresis: float
     severity: str
     message: str
@@ -30,6 +31,8 @@ class DemoRule:
 class RuleStateSnapshot:
     pending_since: dict[tuple[str, str, str], datetime]
     last_rule_sample: dict[tuple[str, str, str], datetime]
+    recovery_since: dict[tuple[str, str, str], datetime]
+    recovery_last_sample: dict[tuple[str, str, str], datetime]
     fall_recovery_since: dict[tuple[str, str], datetime]
     fall_recovery_last_sample: dict[tuple[str, str], datetime]
 
@@ -45,6 +48,7 @@ class RuleEngine:
                 direction="below",
                 threshold=settings.low_spo2_threshold,
                 hold_seconds=settings.hold_seconds,
+                recovery_seconds=settings.recovery_seconds,
                 hysteresis=settings.spo2_hysteresis,
                 severity="warning",
                 message="SpO₂ tham khảo vượt ngưỡng demo thấp",
@@ -56,6 +60,7 @@ class RuleEngine:
                 direction="above",
                 threshold=settings.high_hr_threshold,
                 hold_seconds=settings.hold_seconds,
+                recovery_seconds=settings.recovery_seconds,
                 hysteresis=settings.hr_hysteresis,
                 severity="warning",
                 message="Nhịp tim tham khảo vượt ngưỡng demo cao",
@@ -64,6 +69,8 @@ class RuleEngine:
         )
         self._pending_since: dict[tuple[str, str, str], datetime] = {}
         self._last_rule_sample: dict[tuple[str, str, str], datetime] = {}
+        self._recovery_since: dict[tuple[str, str, str], datetime] = {}
+        self._recovery_last_sample: dict[tuple[str, str, str], datetime] = {}
         self._fall_recovery_since: dict[tuple[str, str], datetime] = {}
         self._fall_recovery_last_sample: dict[tuple[str, str], datetime] = {}
 
@@ -71,6 +78,8 @@ class RuleEngine:
         return RuleStateSnapshot(
             pending_since=dict(self._pending_since),
             last_rule_sample=dict(self._last_rule_sample),
+            recovery_since=dict(self._recovery_since),
+            recovery_last_sample=dict(self._recovery_last_sample),
             fall_recovery_since=dict(self._fall_recovery_since),
             fall_recovery_last_sample=dict(self._fall_recovery_last_sample),
         )
@@ -78,6 +87,8 @@ class RuleEngine:
     def restore_state(self, snapshot: RuleStateSnapshot) -> None:
         self._pending_since = dict(snapshot.pending_since)
         self._last_rule_sample = dict(snapshot.last_rule_sample)
+        self._recovery_since = dict(snapshot.recovery_since)
+        self._recovery_last_sample = dict(snapshot.recovery_last_sample)
         self._fall_recovery_since = dict(snapshot.fall_recovery_since)
         self._fall_recovery_last_sample = dict(snapshot.fall_recovery_last_sample)
 
@@ -125,6 +136,7 @@ class RuleEngine:
             if not is_valid or value is None:
                 self._pending_since.pop(key, None)
                 self._last_rule_sample.pop(key, None)
+                self._clear_vital_recovery(key)
                 continue
 
             previous_sample = self._last_rule_sample.get(key)
@@ -145,6 +157,7 @@ class RuleEngine:
             if active:
                 self._pending_since.pop(key, None)
                 if violating:
+                    self._clear_vital_recovery(key)
                     changed.append(
                         self.database.open_or_touch_alert(
                             device_id=telemetry.device_id,
@@ -156,22 +169,41 @@ class RuleEngine:
                             connection=connection,
                         )
                     )
-                elif recovered and self.database.resolve_alert(
-                    telemetry.device_id,
-                    rule.rule_id,
-                    received,
-                    connection=connection,
-                ):
-                    resolved = self.database.list_alerts(
-                        state="resolved",
-                        device_id=telemetry.device_id,
-                        limit=1,
-                        connection=connection,
+                elif recovered:
+                    previous_recovery = self._recovery_last_sample.get(key)
+                    recovery_gap_broken = previous_recovery is None or (
+                        (received - previous_recovery).total_seconds() < 0
+                        or (received - previous_recovery).total_seconds()
+                        > self.settings.max_sample_gap_seconds
                     )
-                    if resolved:
-                        changed.append(resolved[0])
+                    if recovery_gap_broken:
+                        self._recovery_since[key] = received
+                    self._recovery_last_sample[key] = received
+                    recovery_since = self._recovery_since.setdefault(key, received)
+                    if (
+                        (received - recovery_since).total_seconds()
+                        >= rule.recovery_seconds
+                        and self.database.resolve_alert(
+                            telemetry.device_id,
+                            rule.rule_id,
+                            received,
+                            connection=connection,
+                        )
+                    ):
+                        self._clear_vital_recovery(key)
+                        resolved = self.database.list_alerts(
+                            state="resolved",
+                            device_id=telemetry.device_id,
+                            limit=1,
+                            connection=connection,
+                        )
+                        if resolved:
+                            changed.append(resolved[0])
+                else:
+                    self._clear_vital_recovery(key)
                 continue
 
+            self._clear_vital_recovery(key)
             if not violating:
                 self._pending_since.pop(key, None)
                 continue
@@ -199,9 +231,11 @@ class RuleEngine:
     def _value_and_validity(
         self, telemetry: TelemetryMessage, rule: DemoRule
     ) -> tuple[float | None, bool]:
+        ppg_state_valid = getattr(telemetry.quality, "ppg_state", "valid") == "valid"
         if rule.field == "spo2_pct":
             valid = (
                 telemetry.quality.spo2_valid
+                and ppg_state_valid
                 and telemetry.quality.finger_present
                 and telemetry.quality.motion_valid
                 and not telemetry.quality.motion_artifact
@@ -212,6 +246,7 @@ class RuleEngine:
         if rule.field == "heart_rate_bpm":
             valid = (
                 telemetry.quality.heart_rate_valid
+                and ppg_state_valid
                 and telemetry.quality.finger_present
                 and telemetry.quality.motion_valid
                 and not telemetry.quality.motion_artifact
@@ -220,6 +255,10 @@ class RuleEngine:
             )
             return telemetry.vitals.heart_rate_bpm, valid
         raise ValueError(f"unsupported demo rule field: {rule.field}")
+
+    def _clear_vital_recovery(self, key: tuple[str, str, str]) -> None:
+        self._recovery_since.pop(key, None)
+        self._recovery_last_sample.pop(key, None)
 
     def _evaluate_fall_state(
         self,

@@ -16,7 +16,7 @@
 
 namespace config {
 
-constexpr char kFirmwareVersion[] = "0.3.1";
+constexpr char kFirmwareVersion[] = "0.4.0";
 
 constexpr uint8_t kI2cSdaPin = D2;       // GPIO4
 constexpr uint8_t kI2cSclPin = D1;       // GPIO5
@@ -40,6 +40,8 @@ constexpr uint32_t kSensorRetryMs = 10000;
 constexpr uint32_t kPpgWindowRefreshMs = 1000;
 constexpr uint32_t kPpgStaleMs = 5000;
 constexpr uint32_t kPpgMaximumSamplingGapMs = 250;
+// MAX30102 is configured at 100 samples/s with 4-sample hardware averaging.
+constexpr float kPpgEffectiveSampleRateHz = 25.0F;
 
 constexpr uint32_t kReconnectBackoffMinMs = 1000;
 constexpr uint32_t kReconnectBackoffMaxMs = 30000;

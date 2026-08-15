@@ -116,19 +116,24 @@ def test_main_dry_run_prints_machine_readable_stream(monkeypatch, capsys):
     assert len(output) == 3
     assert output[0]["payload"]["online"] is True
     assert output[1]["topic"].endswith("/telemetry")
-    assert output[1]["payload"]["schema"] == "health.telemetry.v3"
+    assert output[1]["payload"]["schema"] == "health.telemetry.v4"
     assert output[2]["payload"]["online"] is False
 
 
-def test_normal_scenario_emits_strict_v3_wearable_contract(monkeypatch, capsys):
+def test_normal_scenario_emits_strict_v4_confirmed_wearable_contract(monkeypatch, capsys):
     monkeypatch.delenv("MQTT_TLS", raising=False)
 
     assert main(["--dry-run", "--scenario", "normal", "--count", "1"]) == 0
     output = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
     telemetry = output[1]["payload"]
 
-    assert telemetry["schema"] == "health.telemetry.v3"
-    assert set(telemetry["vitals"]) == {"heart_rate_bpm", "spo2_pct"}
+    assert telemetry["schema"] == "health.telemetry.v4"
+    assert set(telemetry["vitals"]) == {
+        "heart_rate_raw_bpm", "heart_rate_bpm", "spo2_raw_pct", "spo2_pct"
+    }
+    assert telemetry["vitals"]["heart_rate_raw_bpm"] == telemetry["vitals"]["heart_rate_bpm"]
+    assert telemetry["vitals"]["spo2_raw_pct"] == telemetry["vitals"]["spo2_pct"]
+    assert telemetry["quality"]["ppg_state"] == "valid"
     assert set(telemetry["wearable"]) == {"wrist_surface_temp_c"}
     assert 0 <= telemetry["wearable"]["wrist_surface_temp_c"] <= 50
     assert telemetry["quality"]["wrist_surface_temp_valid"] is True
@@ -137,7 +142,7 @@ def test_normal_scenario_emits_strict_v3_wearable_contract(monkeypatch, capsys):
     assert "humidity_valid" not in telemetry["quality"]
     assert "skin_temp_c" not in telemetry["vitals"]
     assert "skin_temp_valid" not in telemetry["quality"]
-    assert telemetry["system"]["fw"] == "simulator-1.2.0"
+    assert telemetry["system"]["fw"] == "simulator-1.3.0"
 
 
 def test_ds18b20_fault_scenario_keeps_publishing_null_wrist_temperature(monkeypatch, capsys):
@@ -151,10 +156,25 @@ def test_ds18b20_fault_scenario_keeps_publishing_null_wrist_temperature(monkeypa
 
     assert len(telemetry_messages) == 2
     for telemetry in telemetry_messages:
-        assert telemetry["schema"] == "health.telemetry.v3"
+        assert telemetry["schema"] == "health.telemetry.v4"
         assert telemetry["wearable"] == {"wrist_surface_temp_c": None}
         assert telemetry["quality"]["wrist_surface_temp_valid"] is False
         assert "ds18b20_unavailable" in telemetry["system"]["faults"]
+
+
+def test_unstable_ppg_exposes_raw_candidates_but_withholds_confirmed_values(monkeypatch, capsys):
+    monkeypatch.delenv("MQTT_TLS", raising=False)
+
+    assert main(["--dry-run", "--scenario", "unstable_ppg", "--count", "2"]) == 0
+    output = [json.loads(line) for line in capsys.readouterr().out.splitlines()]
+    telemetry_messages = [
+        item["payload"] for item in output if item["topic"].endswith("/telemetry")
+    ]
+
+    assert [item["vitals"]["heart_rate_raw_bpm"] for item in telemetry_messages] == [180.0, 66.0]
+    assert all(item["vitals"]["heart_rate_bpm"] is None for item in telemetry_messages)
+    assert all(item["quality"]["heart_rate_valid"] is False for item in telemetry_messages)
+    assert all(item["quality"]["ppg_state"] == "unstable" for item in telemetry_messages)
 
 
 def test_high_valid_wrist_surface_temperature_never_opens_health_alert(tmp_path):

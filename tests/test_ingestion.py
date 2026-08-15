@@ -28,6 +28,7 @@ def make_service(
     tmp_path,
     *,
     hold_seconds=0.0,
+    recovery_seconds=0.0,
     fall_recovery_seconds=0.0,
     max_payload_bytes=4096,
     notifier=None,
@@ -36,6 +37,7 @@ def make_service(
     database.initialize()
     settings = DemoRuleSettings(
         hold_seconds=hold_seconds,
+        recovery_seconds=recovery_seconds,
         fall_recovery_seconds=fall_recovery_seconds,
     )
     return database, IngestionService(
@@ -106,6 +108,23 @@ def test_v3_telemetry_is_ingested_with_wearable_normalization(
     assert latest["quality"]["wrist_surface_temp_valid"] is True
     assert latest["environment"] == {"ambient_temp_c": None, "humidity_pct": None}
     assert latest["vitals"]["skin_temp_c"] is None
+
+
+def test_v4_telemetry_persists_raw_and_confirmed_measurements(
+    tmp_path, valid_telemetry_v4_payload
+):
+    database, service = make_service(tmp_path)
+
+    result = service.process_message(message("telemetry", valid_telemetry_v4_payload))
+
+    assert result.accepted and not result.duplicate
+    latest = database.latest_telemetry("health-node-01")
+    assert latest["schema"] == "health.telemetry.v4"
+    assert latest["vitals"]["heart_rate_bpm"] == 76.0
+    assert latest["measurements"]["heart_rate"]["raw_value"] == 76.4
+    assert latest["measurements"]["heart_rate"]["confirmed_value"] == 76.0
+    assert latest["measurements"]["heart_rate"]["reason"] is None
+    assert latest["quality"]["ppg_state"] == "valid"
 
 
 def test_v3_invalid_wrist_surface_flag_pair_is_rejected(
@@ -711,6 +730,8 @@ def test_fault_after_alert_write_restores_rule_state_and_notifies_only_after_com
     snapshot = service.rules.snapshot_state()
     assert snapshot.pending_since == {}
     assert snapshot.last_rule_sample == {}
+    assert snapshot.recovery_since == {}
+    assert snapshot.recovery_last_sample == {}
     assert snapshot.fall_recovery_since == {}
     assert snapshot.fall_recovery_last_sample == {}
     assert database.telemetry_history("health-node-01") == []

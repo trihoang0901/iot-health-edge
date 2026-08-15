@@ -104,7 +104,7 @@ def _write_run(
         "topic_namespace": "iot-health/v1/devices/{device_id}/{stream}",
         "device_id": device_id,
         "boot_id": boot_id,
-        "schema": "health.telemetry.v3",
+        "schema": "health.telemetry.v4",
         "commit": COMMIT,
         "source_provenance": {
             "scope": SOURCE_FINGERPRINT_SCOPE,

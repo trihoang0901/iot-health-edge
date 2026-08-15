@@ -38,6 +38,16 @@ StrictFiniteNumber = Annotated[
     BeforeValidator(require_json_number),
     Field(allow_inf_nan=False),
 ]
+PpgState: TypeAlias = Literal[
+    "valid",
+    "no_finger",
+    "warming_up",
+    "motion",
+    "clipping",
+    "low_perfusion",
+    "unstable",
+    "sample_loss",
+]
 
 
 class StrictModel(BaseModel):
@@ -316,11 +326,111 @@ class TelemetryV3(StrictModel):
         return self
 
 
-TelemetryMessage: TypeAlias = Telemetry | TelemetryV2 | TelemetryV3
+class VitalsV4(StrictModel):
+    heart_rate_raw_bpm: Annotated[StrictFiniteNumber, Field(gt=0, le=300)] | None
+    heart_rate_bpm: Annotated[StrictFiniteNumber, Field(gt=0, le=300)] | None
+    spo2_raw_pct: Annotated[StrictFiniteNumber, Field(ge=0, le=100)] | None
+    spo2_pct: Annotated[StrictFiniteNumber, Field(ge=0, le=100)] | None
+
+
+class QualityV4(StrictModel):
+    ppg: Annotated[StrictFiniteNumber, Field(ge=0, le=1)] | None
+    ppg_state: PpgState
+    finger_present: StrictBool
+    motion_artifact: StrictBool
+    heart_rate_valid: StrictBool
+    spo2_valid: StrictBool
+    motion_valid: StrictBool
+    wrist_surface_temp_valid: StrictBool
+
+
+class TelemetryV4(StrictModel):
+    schema_version: Literal["health.telemetry.v4"] = Field(alias="schema")
+    device_id: DeviceId
+    boot_id: BootId
+    seq: Annotated[StrictInt, Field(ge=0, le=4_294_967_295)]
+    uptime_ms: Annotated[StrictInt, Field(ge=0, le=4_294_967_295)]
+    vitals: VitalsV4
+    wearable: Wearable
+    motion: MotionV3
+    quality: QualityV4
+    system: SystemMetricsV3
+
+    @model_validator(mode="after")
+    def values_follow_validity_and_ppg_state(self) -> "TelemetryV4":
+        confirmed_pairs = (
+            ("heart_rate", self.quality.heart_rate_valid, self.vitals.heart_rate_bpm),
+            ("spo2", self.quality.spo2_valid, self.vitals.spo2_pct),
+            (
+                "wrist_surface_temp",
+                self.quality.wrist_surface_temp_valid,
+                self.wearable.wrist_surface_temp_c,
+            ),
+        )
+        for name, valid, value in confirmed_pairs:
+            if valid and value is None:
+                raise ValueError(f"{name} is valid but its value is null")
+            if not valid and value is not None:
+                raise ValueError(f"{name} is invalid; its value must be null")
+
+        motion_values = (self.motion.accel_g, self.motion.gyro_dps)
+        if self.quality.motion_valid and any(value is None for value in motion_values):
+            raise ValueError("motion is valid but a motion value is null")
+        if not self.quality.motion_valid and any(value is not None for value in motion_values):
+            raise ValueError("motion is invalid; motion values must be null")
+        if not self.quality.motion_valid and self.motion.fall_state != "unknown":
+            raise ValueError("invalid motion must use fall_state='unknown'")
+
+        confirmed_ppg = self.quality.heart_rate_valid or self.quality.spo2_valid
+        if confirmed_ppg and self.quality.ppg_state != "valid":
+            raise ValueError("confirmed PPG vitals require ppg_state='valid'")
+        if confirmed_ppg and not self.quality.finger_present:
+            raise ValueError("PPG vitals cannot be valid without a finger")
+        if confirmed_ppg and self.quality.ppg is None:
+            raise ValueError("valid PPG vitals require a non-null ppg quality score")
+        if confirmed_ppg and not self.quality.motion_valid:
+            raise ValueError("valid PPG vitals require valid motion quality data")
+        if confirmed_ppg and self.quality.motion_artifact:
+            raise ValueError("PPG vitals cannot be valid during motion artifact")
+
+        if self.quality.ppg_state == "valid":
+            if not self.quality.finger_present:
+                raise ValueError("ppg_state='valid' requires a detected finger")
+            if self.quality.ppg is None:
+                raise ValueError("ppg_state='valid' requires a quality score")
+            if not self.quality.motion_valid or self.quality.motion_artifact:
+                raise ValueError("ppg_state='valid' requires clean motion data")
+        if self.quality.ppg_state == "no_finger" and self.quality.finger_present:
+            raise ValueError("ppg_state='no_finger' requires finger_present=false")
+        if (
+            not self.quality.finger_present
+            and self.quality.ppg_state not in {"no_finger", "sample_loss"}
+        ):
+            raise ValueError(
+                "finger_present=false requires ppg_state no_finger or sample_loss"
+            )
+
+        if self.quality.ppg_state in {"no_finger", "sample_loss"} and (
+            self.vitals.heart_rate_raw_bpm is not None
+            or self.vitals.spo2_raw_pct is not None
+        ):
+            raise ValueError(
+                "raw PPG values must be null for no_finger or sample_loss"
+            )
+
+        ds18b20_fault = "ds18b20_unavailable" in self.system.faults
+        if self.quality.wrist_surface_temp_valid and ds18b20_fault:
+            raise ValueError("valid wrist temperature cannot report ds18b20_unavailable")
+        if not self.quality.wrist_surface_temp_valid and not ds18b20_fault:
+            raise ValueError("invalid wrist temperature must report ds18b20_unavailable")
+        return self
+
+
+TelemetryMessage: TypeAlias = Telemetry | TelemetryV2 | TelemetryV3 | TelemetryV4
 
 
 def parse_telemetry(raw_json: str | bytes | bytearray) -> TelemetryMessage:
-    """Parse a strict v1, v2, or v3 telemetry document by its schema discriminator."""
+    """Parse a strict v1-v4 telemetry document by its schema discriminator."""
     payload = json.loads(raw_json)
     if not isinstance(payload, dict):
         raise ValueError("telemetry payload must be a JSON object")
@@ -331,6 +441,8 @@ def parse_telemetry(raw_json: str | bytes | bytearray) -> TelemetryMessage:
         return TelemetryV2.model_validate(payload)
     if schema == "health.telemetry.v3":
         return TelemetryV3.model_validate(payload)
+    if schema == "health.telemetry.v4":
+        return TelemetryV4.model_validate(payload)
     raise ValueError("unsupported telemetry schema")
 
 

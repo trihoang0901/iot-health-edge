@@ -6,7 +6,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 
 from edge.db import Database
-from edge.schemas import Telemetry, TelemetryV2, TelemetryV3
+from edge.schemas import Telemetry, TelemetryV2, TelemetryV3, TelemetryV4
 
 
 def test_outer_transaction_rolls_back_device_session_and_telemetry(
@@ -276,11 +276,12 @@ def test_telemetry_history_window_reports_full_coverage_and_metric_validity(
     }
 
 
-def test_v1_v2_and_v3_rows_share_database_with_normalized_additive_responses(
+def test_v1_through_v4_rows_share_database_with_normalized_additive_responses(
     tmp_path,
     valid_telemetry_payload,
     valid_telemetry_v2_payload,
     valid_telemetry_v3_payload,
+    valid_telemetry_v4_payload,
 ):
     database = Database(tmp_path / "mixed.db")
     database.initialize()
@@ -301,8 +302,13 @@ def test_v1_v2_and_v3_rows_share_database_with_normalized_additive_responses(
         received + timedelta(seconds=2),
         json.dumps(valid_telemetry_v3_payload),
     )
+    database.insert_telemetry(
+        TelemetryV4.model_validate(valid_telemetry_v4_payload),
+        received + timedelta(seconds=3),
+        json.dumps(valid_telemetry_v4_payload),
+    )
 
-    v1, v2, v3 = database.telemetry_history("health-node-01")
+    v1, v2, v3, v4 = database.telemetry_history("health-node-01")
     assert v1["schema"] == v1["schema_version"] == "health.telemetry.v1"
     assert v1["vitals"]["skin_temp_c"] == 34.5
     assert v1["environment"] == {"ambient_temp_c": None, "humidity_pct": None}
@@ -310,6 +316,14 @@ def test_v1_v2_and_v3_rows_share_database_with_normalized_additive_responses(
     assert v1["quality"]["ambient_temp_valid"] is False
     assert v1["quality"]["humidity_valid"] is False
     assert v1["quality"]["wrist_surface_temp_valid"] is False
+    assert v1["measurements"]["heart_rate"] == {
+        "raw_value": 76.0,
+        "confirmed_value": 76.0,
+        "valid": True,
+        "state": "legacy",
+        "reason": None,
+        "unit": "bpm",
+    }
     assert v2["schema"] == v2["schema_version"] == "health.telemetry.v2"
     assert v2["vitals"]["skin_temp_c"] is None
     assert v2["quality"]["skin_temp_valid"] is False
@@ -326,6 +340,62 @@ def test_v1_v2_and_v3_rows_share_database_with_normalized_additive_responses(
     assert v3["quality"]["humidity_valid"] is False
     assert v3["wearable"] == {"wrist_surface_temp_c": 32.8}
     assert v3["quality"]["wrist_surface_temp_valid"] is True
+    assert v3["measurements"]["spo2"]["raw_value"] == 97.0
+    assert v3["measurements"]["spo2"]["state"] == "legacy"
+    assert v4["schema"] == v4["schema_version"] == "health.telemetry.v4"
+    assert v4["vitals"] == {
+        "heart_rate_bpm": 76.0,
+        "spo2_pct": 97.0,
+        "skin_temp_c": None,
+    }
+    assert v4["measurements"]["heart_rate"] == {
+        "raw_value": 76.4,
+        "confirmed_value": 76.0,
+        "valid": True,
+        "state": "valid",
+        "reason": None,
+        "unit": "bpm",
+    }
+    assert v4["measurements"]["spo2"] == {
+        "raw_value": 97.2,
+        "confirmed_value": 97.0,
+        "valid": True,
+        "state": "valid",
+        "reason": None,
+        "unit": "%",
+    }
+    assert v4["quality"]["ppg_state"] == "valid"
+
+
+def test_v4_unconfirmed_measurements_keep_raw_values_and_explain_invalidity(
+    tmp_path, valid_telemetry_v4_payload
+):
+    payload = json.loads(json.dumps(valid_telemetry_v4_payload))
+    payload["vitals"]["heart_rate_bpm"] = None
+    payload["vitals"]["spo2_pct"] = None
+    payload["quality"]["heart_rate_valid"] = False
+    payload["quality"]["spo2_valid"] = False
+    payload["quality"]["ppg_state"] = "unstable"
+    database = Database(tmp_path / "v4-unconfirmed.db")
+    database.initialize()
+
+    database.insert_telemetry(
+        TelemetryV4.model_validate(payload),
+        datetime(2026, 8, 14, 12, 0, tzinfo=UTC),
+        json.dumps(payload),
+    )
+
+    latest = database.latest_telemetry("health-node-01")
+    assert latest["vitals"]["heart_rate_bpm"] is None
+    assert latest["measurements"]["heart_rate"] == {
+        "raw_value": 76.4,
+        "confirmed_value": None,
+        "valid": False,
+        "state": "unstable",
+        "reason": "unstable",
+        "unit": "bpm",
+    }
+    assert latest["measurements"]["spo2"]["reason"] == "unstable"
 
 
 def test_initialize_adds_current_columns_to_legacy_telemetry_without_data_loss(
@@ -403,6 +473,9 @@ def test_initialize_adds_current_columns_to_legacy_telemetry_without_data_loss(
         "humidity_valid",
         "wrist_surface_temp_c",
         "wrist_surface_temp_valid",
+        "heart_rate_raw_bpm",
+        "spo2_raw_pct",
+        "ppg_state",
     } <= columns
     assert row_count == 1
     with database.connection() as connection:
@@ -416,6 +489,10 @@ def test_initialize_adds_current_columns_to_legacy_telemetry_without_data_loss(
     assert migrated["environment"] == {"ambient_temp_c": None, "humidity_pct": None}
     assert migrated["wearable"] == {"wrist_surface_temp_c": None}
     assert migrated["quality"]["wrist_surface_temp_valid"] is False
+    assert migrated["quality"]["ppg_state"] == "legacy"
+    assert migrated["measurements"]["heart_rate"]["raw_value"] == 76.0
+    assert migrated["measurements"]["heart_rate"]["confirmed_value"] == 76.0
+    assert migrated["measurements"]["spo2"]["raw_value"] == 97.0
 
 
 def test_initialize_resolves_active_alert_for_retired_surface_rule(tmp_path):
